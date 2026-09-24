@@ -8,7 +8,7 @@
   let RAIL_GEOMETRY, SUPPORT_GEOMETRY;
   const VIEW = { yaw: 0, pitch: 0.28, dist: 6, target: { x: 0, y: 1.7, z: 26 }, position: { x: 0, y: 0, z: 26 } };
   const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 0, y: 1.7, z: 33 }, position: { x: 0, y: 0, z: 33 } };
-  const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: 7, y: 1.7, z: 24 }, position: { x: 7, y: 0, z: 24 } };
+  const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: -14, y: 1.7, z: -2 }, position: { x: -14, y: 0, z: -2 } };
   // DSB's Portara is the destination Stargate itself. The arrival fly-through starts
   // behind the player on Olympus, overtakes them, dives down the mountain, sweeps
   // the coast/harbor, then backs out over the sea for the island-wide reveal.
@@ -27,7 +27,7 @@
     { t: 11.8, p: [5.0, 9.0, 55.0],    q: [0.0, 5.0, 18.0] },
     { t: 14.5, p: [0.0, 23.0, 92.0],   q: [-3.0, 8.0, 0.0] }
   ];
-  const START = Math.asin(7 / 31), WAIT = 8;
+  const START = 0, WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
   const RENDER = { clear: [0.28, 0.62, 0.9], horizon: [0.48, 0.78, 0.98], zenith: [0.08, 0.38, 0.78], sky: [0.62, 0.82, 1.0], ground: [0.42, 0.38, 0.31], sun: [1.0, 0.95, 0.8], light: { x: -0.35, y: 0.88, z: 0.32 }, stars: 0, shadowCenter: { x: 0, y: 5, z: 0 }, shadowExtent: 64, bloomStrength: 0.28, lights: new Float32Array(80), lightCount: 2 };
@@ -47,7 +47,9 @@
   const dsbScene = { id: "dsb", root: null, camera: null, input: null, debug: null, renderOpts: DARK, get inMotion() { return true; } };
   const point = (a, out) => {
     const f = ((a % TAU + TAU) % TAU) / TAU * N, i = Math.floor(f), t = f - i;
-    out.x = Math.sin(a) * 31; out.z = Math.cos(a) * 31;
+    // Compact Olympus attraction: the Bitcoin ride loops through the mountain
+    // district instead of fencing the island with a perimeter coaster.
+    out.x = -14 + Math.sin(a) * 9; out.z = -8 + Math.cos(a) * 6;
     out.y = railY[i] * (1 - t) + railY[(i + 1) % N] * t;
   };
   const buildRide = () => {
@@ -186,7 +188,7 @@
     return false;
   };
   const atDock = () => near(0, 34, 4.5);
-  const atStation = () => near(7, 24, 4.5);
+  const atStation = () => near(-14, -2, 4.5);
   const board = (kind) => {
     if (phase !== "land") return;
     const trip = kind === "boat" ? boatTrip : trainTrip;
