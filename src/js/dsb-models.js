@@ -227,7 +227,7 @@
     for (const x of [-2.6, 2.6]) block(root, C.purple, x, 1.7, 35, 0.25, 3.4, 0.25);
     block(root, C.yellow, 0, 3.8, 35, 6, 0.2, 2);
     const boats = [boat(), boat(), boat()]; for (const b of boats) addChild(root, b);
-    const station = createNode({ position: { x: 7, y: 0, z: 26 } }); addChild(root, station);
+    const station = createNode({ position: { x: -14, y: 0, z: -2 } }); addChild(root, station);
     block(station, C.stone, 0, -0.1, 0, 5, 0.2, 5);
     for (const x of [-2.3, 2.3]) { block(station, C.purple, x, 4.6, 0, 0.4, 9.2, 0.4); block(station, C.yellow, x, 2, -2.4, 0.25, 4, 0.25); }
     block(station, C.yellow, 0, 9.4, 1, 5.4, 0.4, 7);
