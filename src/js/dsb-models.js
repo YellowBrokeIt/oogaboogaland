@@ -185,7 +185,7 @@
     for (let i = 0; i < 22; i++) block(root, i % 3 ? "#5a4568" : C.yellow, 0, 0.025, 5 + i * 1.35, 2.5, 0.05, 0.8, i % 3 ? 0 : 0.12);
     for (let i = 0; i < 12; i++) for (const side of [-1, 1]) block(root, "#5a4568", side * (3 + i * 1.4), 0.025, 7, 0.8, 0.05, 2);
     // Comedy stage: brick wall, suspended lights, and a microphone.
-    const stage = createNode({ position: { x: -18, y: 0, z: -16 } }); addChild(root, stage);
+    const stage = createNode({ position: { x: -18, y: 0, z: 10 } }); addChild(root, stage);
     block(stage, C.stone, 0, 0.55, 0, 14, 1.1, 8);
     block(stage, C.yellow, 0, 1.12, 3.9, 14, 0.12, 0.15, 0.6);
     const bricks = [];
