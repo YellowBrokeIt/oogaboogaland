@@ -66,40 +66,76 @@
     }
   });
   const build = () => {
-    const root = createNode(), terrain = createNode({ geometry: disc(36, 2.5, C.ground) });
-    addChild(root, terrain);
-    // Concentric shell tiers and scutes sit below the entire river, not just the plain.
-    const turtle = createNode(); addChild(root, turtle);
-    for (let i = 0; i < 5; i++) addChild(turtle, createNode({ geometry: disc(43 - i * 3.4, 1.6, i % 2 ? "#394d43" : "#526744"), position: { x: 0, y: -2.5 - i * 1.55, z: 0 } }));
-    for (let i = 0; i < 20; i++) {
-      const a = i * Math.PI / 10;
-      const plate = block(turtle, i % 2 ? C.yellow : "#7a8451", Math.sin(a) * 36.5, -4.4, Math.cos(a) * 36.5, 5.4, 0.3, 8);
-      plate.rotation.y = a;
-    }
-    block(turtle, C.green, 0, -7, 43, 10, 6, 13);
-    block(turtle, "#88ba70", 0, -6.5, 51, 11, 5, 8);
-    for (const x of [-3.5, 3.5]) {
-      block(turtle, "#fff2a0", x, -3.5, 54.2, 1.8, 1.8, 1.8);
-      block(turtle, C.stone, x, -3.4, 55.15, 0.8, 1.1, 0.2);
-    }
-    block(turtle, C.stone, 0, -7.4, 55.1, 7, 0.25, 0.2);
-    for (const x of [-1, 1]) for (const z of [-1, 1]) {
-      const fin = block(turtle, C.green, x * 35, -8, z * 24, 22, 2.5, 8);
-      fin.rotation.y = x * z * 0.6;
-    }
-    const tail = block(turtle, C.green, 0, -8, -41, 5, 2, 14); tail.rotation.x = -0.15;
-    const water = createNode({ geometry: cached("dsb-water", () => lathe({ profile: [[44, -0.55], [36, -0.55]], segments: 96, color: C.water, emissive: 0.18 })) });
+    const root = createNode();
+    // Ocean first: DSB is now a real island in an apparently unbounded Aegean,
+    // rather than a platform with a decorative edge. The renderer's blue horizon
+    // carries the illusion beyond this large low-poly water disc.
+    const water = createNode({ geometry: disc(155, 0.28, "#2f8ecb"), position: { x: 0, y: -0.75, z: 0 } });
     addChild(root, water);
+    const terrain = createNode({ geometry: disc(36, 2.5, "#8c775c") });
+    addChild(root, terrain);
+    const turtle = createNode(); addChild(root, turtle);
     const falls = [], spray = [];
-    for (let i = 0; i < 64; i++) {
-      const a = i * Math.PI / 32;
-      const fall = block(root, i % 3 ? C.water : C.cyan, Math.sin(a) * 43.7, -4.5, Math.cos(a) * 43.7, 1.8, 8, 0.2, 0.12);
-      fall.rotation.y = a; falls.push(fall);
-      const drop = block(root, C.cyan, Math.sin(a) * 43.9, -1, Math.cos(a) * 43.9, 0.16, 1.4, 0.16, 0.35); spray.push(drop);
-      if (i % 2 === 0) {
-        const marker = block(root, C.yellow, Math.sin(a) * 35.8, 0.15, Math.cos(a) * 35.8, 1.4, 0.12, 0.22, 0.35);
-        marker.rotation.y = a;
-      }
+
+    // Golden-white beach shelf around the gentler two-thirds of the coast.
+    for (let i = 0; i < 34; i++) {
+      const a = -2.55 + i * (5.1 / 33);
+      if (a > 2.2 || a < -2.2) continue;
+      const r = 34.3 + (i % 3) * 0.32;
+      const beach = block(root, i % 2 ? "#e8d4a5" : "#f2dfb5", Math.sin(a) * r, -0.18, Math.cos(a) * r, 4.6, 0.28, 3.1);
+      beach.rotation.y = a;
+    }
+
+    // Mount Olympus: deliberately chunky, stepped and readable in the same
+    // OogaBoogaLand language as the hub. It occupies the wild third of the island.
+    const ox = -18, oz = -14;
+    const tiers = [
+      [0, 3.0, 0, 25, 6, 23, "#756b62"],
+      [0, 7.3, -0.5, 20, 5, 18, "#82766b"],
+      [0.8, 11.2, -1.0, 16, 4.2, 14, "#8f8275"],
+      [1.6, 14.8, -1.8, 12, 3.6, 10, "#9b8c7d"],
+      [2.0, 18.0, -2.3, 8.5, 3.0, 7.4, "#a99a88"],
+      [2.2, 20.7, -2.6, 6.2, 2.5, 5.5, "#b6a794"]
+    ];
+    for (const [dx,y,dz,w,h,d,color] of tiers) block(root, color, ox + dx, y, oz + dz, w, h, d);
+    // White terraces/temples and cypress-like vertical accents.
+    for (const [dx,y,dz,w,d] of [[-5,6.4,4,6,4],[5,10.2,2,5,3.4],[-3,14.1,-2,5,3.5],[3,17.2,-3,4,3]]) {
+      block(root, "#eee7da", ox + dx, y, oz + dz, w, 0.8, d);
+      for (const sx of [-1,1]) block(root, "#f7f2e8", ox + dx + sx * (w * 0.36), y + 1.5, oz + dz, 0.42, 3, 0.42);
+      block(root, "#e1d3bd", ox + dx, y + 3.0, oz + dz, w + 0.7, 0.45, d + 0.5);
+    }
+    for (const [dx,y,dz] of [[-8,5,1],[-6,9,-5],[7,7,3],[5,13,-3],[-2,18,-4],[4,20,-2]]) {
+      block(root, "#3f6a35", ox + dx, y + 2.1, oz + dz, 0.65, 4.2, 0.65);
+      block(root, "#557f45", ox + dx, y + 4.1, oz + dz, 1.3, 1.2, 1.3);
+    }
+    // Waterfalls descending the Olympus terraces.
+    for (const [dx,y,dz,h] of [[-5.8,10.0,6.0,8],[4.7,12.0,4.5,10],[0.5,16.0,1.6,8]]) {
+      const fall = block(root, "#55c9ef", ox + dx, y, oz + dz, 1.2, h, 0.22, 0.28);
+      falls.push(fall);
+      const mist = block(root, "#9ee9f6", ox + dx, y - h * 0.48, oz + dz + 0.15, 0.3, 1.4, 0.3, 0.3);
+      spray.push(mist);
+    }
+
+    // The Portara is not decoration: the circular Stargate horizon is positioned
+    // inside this rectangular marble frame by scene-dsb.js.
+    const py = 31.0, px = ox, pz = oz;
+    block(root, "#f1eadf", px - 3.0, py, pz, 1.05, 8.5, 1.35);
+    block(root, "#f1eadf", px + 3.0, py, pz, 1.05, 8.5, 1.35);
+    block(root, "#f6f0e7", px, py + 4.0, pz, 7.0, 1.05, 1.35);
+    block(root, "#d9c8aa", px, py - 4.1, pz, 8.2, 0.8, 4.0);
+    for (const x of [-4.7,4.7]) block(root, "#d3b36d", px + x, py - 3.3, pz + 0.5, 0.28, 1.4, 0.28, 0.5);
+
+    // First-pass Cycladic / modernist village massing below Olympus.
+    const houses = [
+      [-8,0.8,13,6,4],[-1,0.7,15,5,4],[7,0.8,13,6,4],[14,0.9,9,5,4],
+      [-12,1.2,7,5,4],[-5,1.4,6,5,4],[3,1.2,7,6,4],[10,1.5,4,5,4],
+      [-8,2.1,0,4.5,3.5],[0,1.8,1,5,4],[8,2.0,-1,4.5,3.5]
+    ];
+    for (let i = 0; i < houses.length; i++) {
+      const [x,y,z,w,d] = houses[i];
+      block(root, i % 3 ? "#eee9df" : "#f8f5ef", x, y, z, w, 2.6 + (i % 2) * 0.6, d);
+      if (i % 3 === 0) block(root, "#2d65a3", x, y + 2.2, z, w * 0.45, 0.35, d * 0.45);
+      block(root, "#d8c7aa", x, y + 0.8, z + d * 0.51, w * 0.42, 0.85, 0.16);
     }
     // Raised central monument and radial paths.
     block(root, C.stone, 0, 0.45, 0, 16, 0.9, 4);
@@ -162,12 +198,8 @@
     // The boarding platform meets a level section of the perimeter track.
     for (let i = 0; i < 15; i++) block(station, "#78627d", 3.3, 0.3 + i * 0.6, -3.2 + i * 0.5, 1.6, 0.3, 0.55);
     const carts = [coasterCar(), coasterCar(), coasterCar()]; for (const car of carts) addChild(root, car); const cart = carts[0];
+    // Daylight is the default visual identity of redesigned DSB Land.
     const stars = [];
-    for (let i = 0; i < 36; i++) {
-      const a = i * 2.399963;
-      const star = block(root, i % 3 ? C.cyan : C.yellow, Math.sin(a) * (45 + i % 7 * 3), 20 + i % 9 * 3, Math.cos(a) * (45 + i % 7 * 3), 0.35, 0.35, 0.35, 0.9);
-      stars.push(star);
-    }
     return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station };
   };
   BL.dsbModels = { C, cube, block, text, sign, boat, build };
