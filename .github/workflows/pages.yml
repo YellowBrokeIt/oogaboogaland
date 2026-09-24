@@ -2,7 +2,7 @@ name: Deploy GitHub Pages
 
 on:
   push:
-    branches: [rock]
+    branches: [rock, feature/dsb-land-redesign]
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
@@ -23,8 +23,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out live site
+        uses: actions/checkout@v6
         with:
+          ref: rock
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
@@ -35,12 +37,24 @@ jobs:
         run: node scripts/jumbotron-data.mjs "$OOGATRON_STATS_URL"
         env:
           OOGATRON_STATS_URL: https://oogatron.sterlingbreck.workers.dev/v2/stats
-      - name: Build and stage site
+      - name: Build and stage live site
         run: |
           npm run build
           mkdir -p _site
           cp oogaboogaland.html _site/index.html
-      - name: Upload the built page for the artifact job
+      - name: Check out DSB Land preview
+        uses: actions/checkout@v6
+        with:
+          ref: feature/dsb-land-redesign
+          path: dsb-preview-src
+          persist-credentials: false
+      - name: Build and stage DSB Land preview
+        run: |
+          cd dsb-preview-src
+          npm run build
+          mkdir -p ../_site/dsb-preview
+          cp oogaboogaland.html ../_site/dsb-preview/index.html
+      - name: Upload the built live page for the artifact job
         uses: actions/upload-artifact@v4
         with:
           name: oogaboogaland-page
@@ -62,6 +76,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: rock
       - name: Download the page that was deployed
         uses: actions/download-artifact@v4
         with:
