@@ -268,7 +268,7 @@
     else if (nearLandmark("tv")) openTv();
     else if (nearLandmark("shop")) openShop();
     else if (nearZuzu()) conversation.open();
-    else if (near(-18, -10, 7)) perform();
+    else if (near(-18, 10, 7)) perform();
     else throwTomato();
     return true;
   };
@@ -309,7 +309,7 @@
   };
   const playerAction = () => {
     if (!playerEnabled()) { if (phase === "boat" || phase === "coaster") act(); return true; }
-    if (contextAction() || near(-18, -10, 7)) { act(); return true; }
+    if (contextAction() || near(-18, 10, 7)) { act(); return true; }
     return false;
   };
   const onKey = (event) => {
@@ -452,7 +452,7 @@
     if (land) return;
     land = M.build(); addChild(root, land.root);
     // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
-    Object.assign(transitGate.dialer.position, { x: transitGate.root.position.x + transitGate.outerRadius + 1.2, y: 0, z: VIEW.position.z + 1 });
+    Object.assign(transitGate.dialer.position, { x: OLYMPUS_GATE.x + transitGate.outerRadius + 1.2, y: OLYMPUS_GATE.floor, z: OLYMPUS_GATE.z + 2.4 });
     transitGate.dialer.rotation.y = Math.PI;
     addChild(land.root, transitGate.dialer); register(transitGate.dialer, "stargate-dialer", "Stargate dialer · OogaBoogaLand");
     transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
