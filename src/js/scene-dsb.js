@@ -9,6 +9,22 @@
   const VIEW = { yaw: 0, pitch: 0.28, dist: 6, target: { x: 0, y: 1.7, z: 26 }, position: { x: 0, y: 0, z: 26 } };
   const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 0, y: 1.7, z: 33 }, position: { x: 0, y: 0, z: 33 } };
   const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: 7, y: 1.7, z: 24 }, position: { x: 7, y: 0, z: 24 } };
+  // DSB's Portara is the destination Stargate itself. The arrival fly-through starts
+  // behind the player on Olympus, overtakes them, dives down the mountain, sweeps
+  // the coast/harbor, then backs out over the sea for the island-wide reveal.
+  const OLYMPUS_GATE = { x: -18, y: 31, z: -14 };
+  const ARRIVAL_SECONDS = 14.5;
+  const ARRIVAL_KEYS = [
+    { t: 0.0,  p: [-18.0, 33.2, -9.0],  q: [-18.0, 32.2, -18.0] },
+    { t: 1.4,  p: [-18.0, 33.0, -11.3], q: [-18.0, 31.8, -21.0] },
+    { t: 2.8,  p: [-17.0, 30.5, -22.0], q: [-14.0, 24.0, -34.0] },
+    { t: 4.4,  p: [-8.0, 18.0, -39.0],  q: [0.0, 10.0, -18.0] },
+    { t: 6.2,  p: [27.0, 8.5, -23.0],  q: [7.0, 5.5, 3.0] },
+    { t: 8.1,  p: [32.0, 5.2, 8.0],    q: [12.0, 3.2, 22.0] },
+    { t: 10.1, p: [18.0, 5.8, 36.0],   q: [2.0, 2.5, 31.0] },
+    { t: 11.8, p: [5.0, 9.0, 55.0],    q: [0.0, 5.0, 18.0] },
+    { t: 14.5, p: [0.0, 23.0, 92.0],   q: [-3.0, 8.0, 0.0] }
+  ];
   const START = Math.asin(7 / 31), WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
@@ -117,30 +133,36 @@
     if (phase !== "arrival") return;
     transitGate.finishReceiving();
     phase = "land"; panel.dataset.phase = phase; document.body.classList.remove("dsb-arrival");
-    previous.x = 0; previous.z = 26; pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
+    // Gameplay currently resumes in the harbor district after the cinematic. The
+    // Olympus walkable route will later make the summit gate reachable on foot too.
+    avatar.root.position.x = VIEW.position.x; avatar.root.position.y = avatar.baseY; avatar.root.position.z = VIEW.position.z;
+    previous.x = VIEW.position.x; previous.z = VIEW.position.z; pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
     avatarView = true; hud.setAct("USE"); hud.el.act.hidden = false;
   };
+  const cameraKey = (a, b, t) => {
+    const span = Math.max(0.0001, b.t - a.t), f = smooth((t - a.t) / span);
+    camera.position.x = a.p[0] + (b.p[0] - a.p[0]) * f;
+    camera.position.y = a.p[1] + (b.p[1] - a.p[1]) * f;
+    camera.position.z = a.p[2] + (b.p[2] - a.p[2]) * f;
+    camera.target.x = a.q[0] + (b.q[0] - a.q[0]) * f;
+    camera.target.y = a.q[1] + (b.q[1] - a.q[1]) * f;
+    camera.target.z = a.q[2] + (b.q[2] - a.q[2]) * f;
+  };
   const arrivalCamera = () => {
-    const t = arrivalTime;
-    let x = 0, y, z, ty, tz;
-    if (t < 2.5) {
-      const f = smooth(t / 2.5); y = 3.36 + (46 - 3.36) * f; z = 31.77 + (85 - 31.77) * f; ty = 1.7 - 5.7 * f; tz = 26 * (1 - f);
-    } else if (t < 10.5) {
-      const a = smooth((t - 2.5) / 8) * TAU;
-      x = Math.sin(a) * 85; z = Math.cos(a) * 85; y = 8 + Math.cos(a) * 38; ty = -4; tz = 0;
-    } else {
-      const f = smooth((t - 10.5) / 2.5); y = 46 + (3.36 - 46) * f; z = 85 + (31.77 - 85) * f; ty = -4 + 5.7 * f; tz = 26 * f;
-    }
-    camera.position.x = x; camera.position.y = y; camera.position.z = z;
-    camera.target.x = 0; camera.target.y = ty; camera.target.z = tz;
+    const t = clamp(arrivalTime, 0, ARRIVAL_SECONDS);
+    let i = 0;
+    while (i < ARRIVAL_KEYS.length - 2 && t > ARRIVAL_KEYS[i + 1].t) i++;
+    cameraKey(ARRIVAL_KEYS[i], ARRIVAL_KEYS[i + 1], t);
   };
   const reveal = () => {
     if (phase !== "entrance") return;
     // Only the consumed backside crossing may construct the land.
     progress = 1; buildLand();
     phase = "arrival"; arrivalTime = 0; flash = 1; dsbScene.renderOpts = RENDER;
-    transitGate.root.position.z = 28;
-    avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 28; poseAvatar(false, 0);
+    // The receiving Stargate is now the Portara at the top of Mount Olympus.
+    Object.assign(transitGate.root.position, OLYMPUS_GATE);
+    avatar.root.position.x = OLYMPUS_GATE.x; avatar.root.position.y = OLYMPUS_GATE.y + avatar.baseY; avatar.root.position.z = OLYMPUS_GATE.z - 2.0;
+    avatar.root.rotation.y = Math.PI; poseAvatar(false, 0);
     document.body.classList.remove("dsb-entry"); document.body.classList.add("dsb-arrival"); panel.dataset.phase = phase;
     audio.arrive(); arrivalCamera();
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finishArrival();
@@ -327,7 +349,15 @@
       return;
     }
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);
-    if (phase === "arrival") { arrivalTime += dt; avatar.root.position.z = 28 - 2 * smooth(arrivalTime / 0.6); poseAvatar(arrivalTime < 0.6, dt); arrivalCamera(); if (arrivalTime >= 13) finishArrival(); }
+    if (phase === "arrival") {
+      arrivalTime += dt;
+      // One deliberate step out of the Portara, then the player holds at the
+      // summit while the camera overtakes and performs the island reveal.
+      avatar.root.position.z = OLYMPUS_GATE.z - 2.0 - 1.8 * smooth(arrivalTime / 0.9);
+      poseAvatar(arrivalTime < 0.9, dt);
+      arrivalCamera();
+      if (arrivalTime >= ARRIVAL_SECONDS) finishArrival();
+    }
     if (phase === "land") {
       avatar.root.visible = true;
       if (cameraEnabled()) {
