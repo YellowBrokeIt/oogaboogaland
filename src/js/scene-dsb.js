@@ -12,11 +12,13 @@
   // DSB's Portara is the destination Stargate itself. The arrival fly-through starts
   // behind the player on Olympus, overtakes them, dives down the mountain, sweeps
   // the coast/harbor, then backs out over the sea for the island-wide reveal.
-  const OLYMPUS_GATE = { x: -18, y: 31, z: -14 };
-  const ARRIVAL_SECONDS = 14.5;
+  const OLYMPUS_GATE = { x: -18, y: 31, z: -14, floor: 26.9 };
+  const SUMMIT_SPAWN = { x: -18, y: 26.9, z: -11.5 };
+  const SUMMIT_VIEW = { yaw: Math.PI, pitch: 0.26, dist: 6, target: { x: -18, y: 28.6, z: -10.0 }, position: { x: -18, y: 26.9, z: -11.5 } };
+  const FLYOVER_SECONDS = 14.5, GLORY_HOLD_SECONDS = 4, ARRIVAL_SECONDS = FLYOVER_SECONDS + GLORY_HOLD_SECONDS;
   const ARRIVAL_KEYS = [
-    { t: 0.0,  p: [-18.0, 33.2, -9.0],  q: [-18.0, 32.2, -18.0] },
-    { t: 1.4,  p: [-18.0, 33.0, -11.3], q: [-18.0, 31.8, -21.0] },
+    { t: 0.0,  p: [-18.0, 29.2, -17.5], q: [-18.0, 28.8, -7.0] },
+    { t: 1.4,  p: [-18.0, 29.0, -14.0], q: [-17.5, 27.0, -4.5] },
     { t: 2.8,  p: [-17.0, 30.5, -22.0], q: [-14.0, 24.0, -34.0] },
     { t: 4.4,  p: [-8.0, 18.0, -39.0],  q: [0.0, 10.0, -18.0] },
     { t: 6.2,  p: [27.0, 8.5, -23.0],  q: [7.0, 5.5, 3.0] },
@@ -133,11 +135,14 @@
     if (phase !== "arrival") return;
     transitGate.finishReceiving();
     phase = "land"; panel.dataset.phase = phase; document.body.classList.remove("dsb-arrival");
-    // Gameplay currently resumes in the harbor district after the cinematic. The
-    // Olympus walkable route will later make the summit gate reachable on foot too.
-    avatar.root.position.x = VIEW.position.x; avatar.root.position.y = avatar.baseY; avatar.root.position.z = VIEW.position.z;
-    previous.x = VIEW.position.x; previous.z = VIEW.position.z; pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
+    // After the four-second hero hold, cut back behind the player at the Portara.
+    // From here the authored Olympus trail provides the invitation to descend.
+    avatar.root.position.x = SUMMIT_SPAWN.x; avatar.root.position.y = SUMMIT_SPAWN.y + avatar.baseY; avatar.root.position.z = SUMMIT_SPAWN.z;
+    avatar.root.rotation.y = 0;
+    previous.x = SUMMIT_SPAWN.x; previous.z = SUMMIT_SPAWN.z;
+    pilot.possess(avatar); pilot.navigate(SUMMIT_VIEW); syncPlayer(); pilot.update(0);
     avatarView = true; hud.setAct("USE"); hud.el.act.hidden = false;
+    toast("Descend from Olympus to the town and harbor.");
   };
   const cameraKey = (a, b, t) => {
     const span = Math.max(0.0001, b.t - a.t), f = smooth((t - a.t) / span);
@@ -149,7 +154,9 @@
     camera.target.z = a.q[2] + (b.q[2] - a.q[2]) * f;
   };
   const arrivalCamera = () => {
-    const t = clamp(arrivalTime, 0, ARRIVAL_SECONDS);
+    // FLYOVER_SECONDS reaches the island-wide hero shot. Clamping here holds
+    // that exact framing for GLORY_HOLD_SECONDS before gameplay resumes.
+    const t = clamp(arrivalTime, 0, FLYOVER_SECONDS);
     let i = 0;
     while (i < ARRIVAL_KEYS.length - 2 && t > ARRIVAL_KEYS[i + 1].t) i++;
     cameraKey(ARRIVAL_KEYS[i], ARRIVAL_KEYS[i + 1], t);
@@ -161,8 +168,8 @@
     phase = "arrival"; arrivalTime = 0; flash = 1; dsbScene.renderOpts = RENDER;
     // The receiving Stargate is now the Portara at the top of Mount Olympus.
     Object.assign(transitGate.root.position, OLYMPUS_GATE);
-    avatar.root.position.x = OLYMPUS_GATE.x; avatar.root.position.y = OLYMPUS_GATE.y + avatar.baseY; avatar.root.position.z = OLYMPUS_GATE.z - 2.0;
-    avatar.root.rotation.y = Math.PI; poseAvatar(false, 0);
+    avatar.root.position.x = SUMMIT_SPAWN.x; avatar.root.position.y = SUMMIT_SPAWN.y + avatar.baseY; avatar.root.position.z = SUMMIT_SPAWN.z;
+    avatar.root.rotation.y = 0; poseAvatar(false, 0);
     document.body.classList.remove("dsb-entry"); document.body.classList.add("dsb-arrival"); panel.dataset.phase = phase;
     audio.arrive(); arrivalCamera();
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finishArrival();
@@ -351,9 +358,9 @@
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);
     if (phase === "arrival") {
       arrivalTime += dt;
-      // One deliberate step out of the Portara, then the player holds at the
-      // summit while the camera overtakes and performs the island reveal.
-      avatar.root.position.z = OLYMPUS_GATE.z - 2.0 - 1.8 * smooth(arrivalTime / 0.9);
+      // One deliberate step toward the descent, then the player remains at the
+      // Portara while the camera flies the island and holds the final glory shot.
+      avatar.root.position.z = SUMMIT_SPAWN.z + 0.9 * smooth(arrivalTime / 0.9);
       poseAvatar(arrivalTime < 0.9, dt);
       arrivalCamera();
       if (arrivalTime >= ARRIVAL_SECONDS) finishArrival();
@@ -395,6 +402,7 @@
     fx.update(dt);
     land.landmarks.tv.point(-0.55, 3.3, 1.63, radioSource);
     audio.environment(camera, land.boats[0].position, dt, radioSource);
+    land.updateEnvironment?.(time, camera.position, phase === "arrival");
     for (let i = 0; i < land.falls.length; i++) { const f = land.falls[i]; f.glow = 0.55 + 0.2 * Math.sin(time * 3 + i * 0.4); f.scale.y = 7.5 + 0.5 * Math.sin(time * 1.7 + i); land.spray[i].position.y = -0.5 - (time * 4 + i * 0.71) % 11; }
     if (data.state.height !== lastHeight) { if (lastHeight) skyPulse = 1; lastHeight = data.state.height; }
     skyPulse = Math.max(0, skyPulse - dt * 0.25);
@@ -492,9 +500,9 @@
     hud = BL.hud.create({ roster: BL.contributors.roster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: false });
     oldSheetHidden = hud.el.sheet.hidden; oldSheetOpen = hud.el.sheet.dataset.open; hud.el.sheet.hidden = true; hud.el.sheet.dataset.open = "false"; hud.setJetpack(false, false, 1); hud.el.act.hidden = true;
     const hooks = {}; input = BL.interact.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: () => 0 } });
+    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: (x, z) => land?.groundAt(x, z) ?? 0 } });
     fx = BL.fx.create({ root, renderer, camera, overlay: ctx.overlay, hud, tickerAt: { x: 0, y: 2, z: 26 } });
-    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: () => 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact, onProjectileMove: projectileMove };
+    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: (x, z) => land?.groundAt(x, z) ?? 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact, onProjectileMove: projectileMove };
     crew = BL.crew.create(shared); shared.crew = crew; pilot.bind(shared);
     avatar = crew.cavemen.get(playerName); crew.collectMagazine(avatar); avatar.root.rotation.y = Math.PI;
     for (const key of Object.keys(pilot.hooks)) { const hook = pilot.hooks[key]; hooks[key] = (...args) => { if (cameraEnabled() && key !== "onDoubleTap") return hook(...args);
