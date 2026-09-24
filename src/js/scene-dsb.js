@@ -28,7 +28,7 @@
   const START = Math.asin(7 / 31), WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
-  const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
+  const RENDER = { clear: [0.28, 0.62, 0.9], horizon: [0.48, 0.78, 0.98], zenith: [0.08, 0.38, 0.78], sky: [0.62, 0.82, 1.0], ground: [0.42, 0.38, 0.31], sun: [1.0, 0.95, 0.8], light: { x: -0.35, y: 0.88, z: 0.32 }, stars: 0, shadowCenter: { x: 0, y: 5, z: 0 }, shadowExtent: 64, bloomStrength: 0.28, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
   let root, camera, input, pilot, hud, renderer, world, game, go, land, transitGate, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu, conversation;
   let exiting = false;
