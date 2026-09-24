@@ -65,6 +65,22 @@
       return z >= depth && Math.hypot(x, z - 3.5) < range;
     }
   });
+  const OLYMPUS_TRAIL = [
+    [-18, -11.5, 26.9], [-17.5, -8.5, 24.5], [-15.5, -5.5, 21.5],
+    [-12.5, -2.0, 18.0], [-9.0, 1.0, 14.0], [-6.0, 4.0, 10.5],
+    [-3.0, 7.0, 7.0], [-1.0, 10.0, 3.5], [0.0, 13.0, 0.0]
+  ];
+  const trailGroundAt = (x, z) => {
+    let best = Infinity, height = 0;
+    for (let i = 0; i < OLYMPUS_TRAIL.length - 1; i++) {
+      const a = OLYMPUS_TRAIL[i], b = OLYMPUS_TRAIL[i + 1];
+      const dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz;
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / Math.max(1e-6, len2)));
+      const px = a[0] + dx * t, pz = a[1] + dz * t, distance = Math.hypot(x - px, z - pz);
+      if (distance < best) { best = distance; height = a[2] + (b[2] - a[2]) * t; }
+    }
+    return best <= 2.35 ? height : 0;
+  };
   const build = () => {
     const root = createNode();
     // Ocean first: DSB is now a real island in an apparently unbounded Aegean,
@@ -75,7 +91,11 @@
     const terrain = createNode({ geometry: disc(36, 2.5, "#8c775c") });
     addChild(root, terrain);
     const turtle = createNode(); addChild(root, turtle);
-    const falls = [], spray = [];
+    const falls = [], spray = [], foam = [];
+    // Stream only decorative density. Major silhouettes stay resident so the
+    // island still reads correctly from Olympus, the sea and the intro camera.
+    const olympusDetail = createNode(), villageDetail = createNode(), harborDetail = createNode();
+    addChild(root, olympusDetail, villageDetail, harborDetail);
 
     // Golden-white beach shelf around the gentler two-thirds of the coast.
     for (let i = 0; i < 34; i++) {
@@ -84,6 +104,14 @@
       const r = 34.3 + (i % 3) * 0.32;
       const beach = block(root, i % 2 ? "#e8d4a5" : "#f2dfb5", Math.sin(a) * r, -0.18, Math.cos(a) * r, 4.6, 0.28, 3.1);
       beach.rotation.y = a;
+    }
+
+    // Cheap shoreline motion: a few emissive foam strips sell waves without
+    // simulating an ocean mesh. They only animate when the scene updates.
+    for (let i = 0; i < 20; i++) {
+      const a = -2.05 + i * (4.1 / 19), r = 35.2 + (i % 2) * 0.25;
+      const strip = block(root, "#bcebf4", Math.sin(a) * r, -0.47, Math.cos(a) * r, 2.8, 0.055, 0.18, 0.22);
+      strip.rotation.y = a; foam.push(strip);
     }
 
     // Mount Olympus: deliberately chunky, stepped and readable in the same
@@ -100,13 +128,13 @@
     for (const [dx,y,dz,w,h,d,color] of tiers) block(root, color, ox + dx, y, oz + dz, w, h, d);
     // White terraces/temples and cypress-like vertical accents.
     for (const [dx,y,dz,w,d] of [[-5,6.4,4,6,4],[5,10.2,2,5,3.4],[-3,14.1,-2,5,3.5],[3,17.2,-3,4,3]]) {
-      block(root, "#eee7da", ox + dx, y, oz + dz, w, 0.8, d);
-      for (const sx of [-1,1]) block(root, "#f7f2e8", ox + dx + sx * (w * 0.36), y + 1.5, oz + dz, 0.42, 3, 0.42);
-      block(root, "#e1d3bd", ox + dx, y + 3.0, oz + dz, w + 0.7, 0.45, d + 0.5);
+      block(olympusDetail, "#eee7da", ox + dx, y, oz + dz, w, 0.8, d);
+      for (const sx of [-1,1]) block(olympusDetail, "#f7f2e8", ox + dx + sx * (w * 0.36), y + 1.5, oz + dz, 0.42, 3, 0.42);
+      block(olympusDetail, "#e1d3bd", ox + dx, y + 3.0, oz + dz, w + 0.7, 0.45, d + 0.5);
     }
     for (const [dx,y,dz] of [[-8,5,1],[-6,9,-5],[7,7,3],[5,13,-3],[-2,18,-4],[4,20,-2]]) {
-      block(root, "#3f6a35", ox + dx, y + 2.1, oz + dz, 0.65, 4.2, 0.65);
-      block(root, "#557f45", ox + dx, y + 4.1, oz + dz, 1.3, 1.2, 1.3);
+      block(olympusDetail, "#3f6a35", ox + dx, y + 2.1, oz + dz, 0.65, 4.2, 0.65);
+      block(olympusDetail, "#557f45", ox + dx, y + 4.1, oz + dz, 1.3, 1.2, 1.3);
     }
     // Waterfalls descending the Olympus terraces.
     for (const [dx,y,dz,h] of [[-5.8,10.0,6.0,8],[4.7,12.0,4.5,10],[0.5,16.0,1.6,8]]) {
@@ -125,6 +153,17 @@
     block(root, "#d9c8aa", px, py - 4.1, pz, 8.2, 0.8, 4.0);
     for (const x of [-4.7,4.7]) block(root, "#d3b36d", px + x, py - 3.3, pz + 0.5, 0.28, 1.4, 0.28, 0.5);
 
+    // Walkable Olympus descent. Closely spaced slabs make the physical height
+    // transition gradual enough for the existing Ooga walking/step rules.
+    for (let i = 0; i < OLYMPUS_TRAIL.length - 1; i++) {
+      const a = OLYMPUS_TRAIL[i], b = OLYMPUS_TRAIL[i + 1];
+      const distance = Math.hypot(b[0] - a[0], b[1] - a[1]), steps = Math.max(2, Math.ceil(distance / 0.42));
+      for (let j = 0; j <= steps; j++) {
+        const t = j / steps, x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t, y = a[2] + (b[2] - a[2]) * t;
+        block(root, j % 3 ? "#d6c5a7" : "#eadbc1", x, y - 0.12, z, 2.9, 0.24, 0.52);
+      }
+    }
+
     // First-pass Cycladic / modernist village massing below Olympus.
     const houses = [
       [-8,0.8,13,6,4],[-1,0.7,15,5,4],[7,0.8,13,6,4],[14,0.9,9,5,4],
@@ -134,8 +173,8 @@
     for (let i = 0; i < houses.length; i++) {
       const [x,y,z,w,d] = houses[i];
       block(root, i % 3 ? "#eee9df" : "#f8f5ef", x, y, z, w, 2.6 + (i % 2) * 0.6, d);
-      if (i % 3 === 0) block(root, "#2d65a3", x, y + 2.2, z, w * 0.45, 0.35, d * 0.45);
-      block(root, "#d8c7aa", x, y + 0.8, z + d * 0.51, w * 0.42, 0.85, 0.16);
+      if (i % 3 === 0) block(villageDetail, "#2d65a3", x, y + 2.2, z, w * 0.45, 0.35, d * 0.45);
+      block(villageDetail, "#d8c7aa", x, y + 0.8, z + d * 0.51, w * 0.42, 0.85, 0.16);
     }
     // Raised central monument and radial paths.
     block(root, C.stone, 0, 0.45, 0, 16, 0.9, 4);
@@ -198,9 +237,36 @@
     // The boarding platform meets a level section of the perimeter track.
     for (let i = 0; i < 15; i++) block(station, "#78627d", 3.3, 0.3 + i * 0.6, -3.2 + i * 0.5, 1.6, 0.3, 0.55);
     const carts = [coasterCar(), coasterCar(), coasterCar()]; for (const car of carts) addChild(root, car); const cart = carts[0];
+    for (let i = 0; i < 10; i++) {
+      const x = -5.2 + i * 1.15;
+      block(harborDetail, "#7b5a38", x, 0.55, 36.2, 0.22, 1.3, 0.22);
+      if (i % 2 === 0) block(harborDetail, "#f0b84d", x, 1.32, 36.2, 0.16, 0.18, 0.16, 0.45);
+    }
+    const chunkState = { olympus: true, village: true, harbor: true };
+    const updateStreaming = (viewer, cinematic = false) => {
+      const test = (node, key, x, z, range) => {
+        const next = cinematic || Math.hypot(viewer.x - x, viewer.z - z) <= range;
+        if (chunkState[key] !== next) { chunkState[key] = next; node.visible = next; }
+      };
+      test(olympusDetail, "olympus", -18, -14, 60);
+      test(villageDetail, "village", 0, 9, 52);
+      test(harborDetail, "harbor", 0, 34, 42);
+    };
+    const updateEnvironment = (time, viewer, cinematic = false) => {
+      water.position.y = -0.75 + Math.sin(time * 0.55) * 0.035;
+      water.glow = 0.08 + 0.035 * Math.sin(time * 0.35);
+      for (let i = 0; i < foam.length; i++) {
+        const strip = foam[i], wave = Math.sin(time * 1.05 + i * 0.73);
+        strip.position.y = -0.46 + wave * 0.035;
+        strip.scale.x = 0.9 + wave * 0.08;
+        strip.glow = 0.16 + (wave + 1) * 0.05;
+      }
+      updateStreaming(viewer, cinematic);
+    };
+    const groundAt = (x, z) => trailGroundAt(x, z);
     // Daylight is the default visual identity of redesigned DSB Land.
     const stars = [];
-    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station };
+    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, foam, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station, groundAt, updateStreaming, updateEnvironment, chunks: { olympusDetail, villageDetail, harborDetail } };
   };
   BL.dsbModels = { C, cube, block, text, sign, boat, build };
 })();
