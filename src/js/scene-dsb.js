@@ -474,7 +474,7 @@
     buildRide();
     for (let i = 0; i < 6; i++) {
       const contributor = BL.contributors.roster[i % BL.contributors.roster.length], cave = BL.models.caveman(BL.contributors.traitsFor(contributor.name));
-      cave.baseY = cave.root.position.y; cave.floorY = i === 5 ? 1.1 : 0; cave.root.position.x = i === 5 ? -18 : -24 + i * 2.2; cave.root.position.z = i === 5 ? -15.6 : -6; cave.heading = i === 5 ? 0 : Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
+      cave.baseY = cave.root.position.y; cave.floorY = i === 5 ? 1.1 : 0; cave.root.position.x = i === 5 ? -18 : -10 + i * 4.2; cave.root.position.z = i === 5 ? 10.4 : 12 + (i % 2) * 3; cave.heading = i === 5 ? 0 : Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
       addChild(land.root, cave.root); visitors.push(cave); input.add(cave.root, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }, { radius: 1 }); targets.push(cave.root);
       for (const key of ["head", "torso", "armL", "armR", "legL", "legR"]) { const node = cave.parts[key]; input.add(node, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }); targets.push(node); }
     }
