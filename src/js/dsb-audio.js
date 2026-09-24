@@ -44,11 +44,17 @@
       bus.gain.setTargetAtTime(enabled ? 1 : 0, at, 0.3);
       if (!enabled) { nextCall = at + 2; return; }
       const radius = Math.hypot(camera.position.x, camera.position.z), ux = radius > 0.01 ? camera.position.x / radius : 0, uz = radius > 0.01 ? camera.position.z / radius : 1;
-      position(layers.river, ux * 39, -0.5, uz * 39, camera, 0.065 * (0.93 + Math.sin(at * 0.6) * 0.07), 15, 0);
-      position(layers.waterfall, ux * 44, -5, uz * 44, camera, 0.09, 17, 1);
+      // "river" is retained as an API/stat key, but now represents the nearest
+      // stretch of surf. This keeps the audio graph cheap while making beaches
+      // grow naturally louder as the player approaches the coast.
+      position(layers.river, ux * 35, -0.4, uz * 35, camera, 0.065 * (0.93 + Math.sin(at * 0.6) * 0.07), 18, 0);
+      // Olympus waterfalls are a fixed landmark source rather than a perimeter loop.
+      position(layers.waterfall, -18, 12, -9, camera, 0.09, 22, 1);
+      // The boat source follows the catamaran/harbor craft.
       position(layers.motor, boat.x, boat.y, boat.z, camera, 0.023 * (0.9 + Math.sin(at * 16) * 0.1), 13, 2);
       motor.frequency.setTargetAtTime(58 + Math.sin(at * 0.8) * 3, at, 0.1);
-      position(layers.crowd, -18, 1, -9, camera, 0.026 * (0.55 + 0.2 * Math.sin(at * 2.7) + 0.15 * Math.sin(at * 4.1)), 11, 3);
+      // Town murmur stays local to the Agora/harbor instead of filling the island.
+      position(layers.crowd, 0, 1.5, 18, camera, 0.026 * (0.55 + 0.2 * Math.sin(at * 2.7) + 0.15 * Math.sin(at * 4.1)), 16, 3);
       murmur.frequency.setTargetAtTime(650 + Math.sin(at * 1.9) * 180, at, 0.12);
       if (at >= nextCall) {
         birdSide = calls % 2;
@@ -59,7 +65,8 @@
         bird.gain.gain.cancelScheduledValues(at); bird.gain.gain.setValueAtTime(0, at); bird.gain.gain.linearRampToValueAtTime(0.65, at + 0.02);
         bird.gain.gain.linearRampToValueAtTime(0, at + 0.12); bird.gain.gain.linearRampToValueAtTime(0.5, at + 0.17); bird.gain.gain.linearRampToValueAtTime(0, at + 0.3);
       }
-      position(layers.wildlife, birdSide ? 25 : -27, 3, birdSide ? -21 : 3, camera, 0.016, 28, 4);
+      // Alternate bird/cicada pockets between exposed Olympus and the quieter east coast.
+      position(layers.wildlife, birdSide ? 22 : -20, birdSide ? 3 : 16, birdSide ? 4 : -10, camera, 0.016, 30, 4);
     };
     return { update, get stats() { return { enabled, calls, sources: sources.length, nodes: nodes.length, river: targets[0], waterfall: targets[1], motor: targets[2], crowd: targets[3], wildlife: targets[4], gain: bus.gain.value, motorPan: layers.motor.pan.pan.value }; }, dispose: () => { for (const source of sources) { source.stop(); source.disconnect(); } for (const node of nodes) node.disconnect(); } };
   };
