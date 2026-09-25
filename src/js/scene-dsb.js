@@ -90,7 +90,8 @@
     && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
     && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius))
     && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
-      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius);
+      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius
+        && !land?.trailAt(x, z, radius));
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
     for (let i = 1; i <= steps; i++) if (!clearAt(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, actor.bodyRadius)) return false;
@@ -110,7 +111,7 @@
     if (avatarView && !pilot?.player) p.y = 1.7;
     if (radius > 35) { p.x *= 35 / radius; p.z *= 35 / radius; }
     // Solid landmark footprints; each attempted step keeps its last clear position.
-    if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z)) || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
+    if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z)) || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5 && !land?.trailAt(p.x, p.z)) { p.x = previous.x; p.z = previous.z; }
     previous.x = p.x; previous.z = p.z;
   };
   const clampCamera = (p) => { p.y = clamp(p.y, 0.5, 75); };
