@@ -70,7 +70,7 @@
     [-12.5, -2.0, 18.0], [-9.0, 1.0, 14.0], [-6.0, 4.0, 10.5],
     [-3.0, 7.0, 7.0], [-1.0, 10.0, 3.5], [0.0, 13.0, 0.0]
   ];
-  const trailGroundAt = (x, z) => {
+  const trailSample = (x, z) => {
     let best = Infinity, height = 0;
     for (let i = 0; i < OLYMPUS_TRAIL.length - 1; i++) {
       const a = OLYMPUS_TRAIL[i], b = OLYMPUS_TRAIL[i + 1];
@@ -79,8 +79,13 @@
       const px = a[0] + dx * t, pz = a[1] + dz * t, distance = Math.hypot(x - px, z - pz);
       if (distance < best) { best = distance; height = a[2] + (b[2] - a[2]) * t; }
     }
-    return best <= 2.35 ? height : 0;
+    return { distance: best, height };
   };
+  const trailGroundAt = (x, z) => {
+    const sample = trailSample(x, z);
+    return sample.distance <= 2.35 ? sample.height : 0;
+  };
+  const trailAt = (x, z, radius = 0) => trailSample(x, z).distance <= Math.max(0.8, 2.35 - radius * 0.35);
   const build = () => {
     const root = createNode();
     // Ocean first: DSB is now a real island in an apparently unbounded Aegean,
@@ -266,7 +271,7 @@
     const groundAt = (x, z) => trailGroundAt(x, z);
     // Daylight is the default visual identity of redesigned DSB Land.
     const stars = [];
-    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, foam, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station, groundAt, updateStreaming, updateEnvironment, chunks: { olympusDetail, villageDetail, harborDetail } };
+    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, foam, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station, groundAt, trailAt, updateStreaming, updateEnvironment, chunks: { olympusDetail, villageDetail, harborDetail } };
   };
   BL.dsbModels = { C, cube, block, text, sign, boat, build };
 })();
