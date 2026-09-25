@@ -1,8 +1,8 @@
-name: Deploy GitHub Pages
+name: Deploy DSB Preview
 
 on:
   push:
-    branches: [rock, feature/dsb-land-redesign]
+    branches: [feature/dsb-land-redesign]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: dsb-pages-preview
   cancel-in-progress: true
 
 jobs:
@@ -21,10 +21,18 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Check out live site
+      - name: Check out stable rock
         uses: actions/checkout@v6
         with:
           ref: rock
+          path: live-src
+          persist-credentials: false
+
+      - name: Check out DSB redesign
+        uses: actions/checkout@v6
+        with:
+          ref: feature/dsb-land-redesign
+          path: preview-src
           persist-credentials: false
 
       - uses: actions/setup-node@v6
@@ -34,27 +42,14 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
-      - name: Refresh Oogatron activity snapshot
-        run: node scripts/jumbotron-data.mjs "$OOGATRON_STATS_URL"
-        env:
-          OOGATRON_STATS_URL: https://oogatron.sterlingbreck.workers.dev/v2/stats
-
-      - name: Build live site
+      - name: Stage stable site
         run: |
-          npm run build
           mkdir -p _site
-          cp oogaboogaland.html _site/index.html
+          cp live-src/oogaboogaland.html _site/index.html
 
-      - name: Check out DSB Land preview
-        uses: actions/checkout@v6
-        with:
-          ref: feature/dsb-land-redesign
-          path: dsb-preview-src
-          persist-credentials: false
-
-      - name: Build DSB Land preview
+      - name: Build and stage DSB preview
         run: |
-          cd dsb-preview-src
+          cd preview-src
           npm run build
           mkdir -p ../_site/dsb-preview
           cp oogaboogaland.html ../_site/dsb-preview/index.html
