@@ -63,13 +63,53 @@
     };
     return { update, get stats() { return { enabled, calls, sources: sources.length, nodes: nodes.length, river: targets[0], waterfall: targets[1], motor: targets[2], crowd: targets[3], wildlife: targets[4], gain: bus.gain.value, motorPan: layers.motor.pan.pan.value }; }, dispose: () => { for (const source of sources) { source.stop(); source.disconnect(); } for (const node of nodes) node.disconnect(); } };
   };
+  const createInteriorAmbience = (context, master) => {
+    const bus=context.createGain(); bus.gain.value=0; bus.connect(master);
+    const humGain=context.createGain(); humGain.gain.value=0; humGain.connect(bus);
+    const hum=context.createOscillator(); hum.type="triangle"; hum.frequency.value=46; hum.connect(humGain); hum.start();
+
+    const buzzGain=context.createGain(); buzzGain.gain.value=0; buzzGain.connect(bus);
+    const buzz=context.createOscillator(); buzz.type="sawtooth"; buzz.frequency.value=92; buzz.connect(buzzGain); buzz.start();
+
+    const noiseBuffer=context.createBuffer(1,context.sampleRate*2,context.sampleRate), samples=noiseBuffer.getChannelData(0);
+    let seed=48121;
+    for(let i=0;i<samples.length;i++){ seed=(Math.imul(seed,1103515245)+12345)|0; samples[i]=((seed>>>0)/2147483648)-1; }
+    const noise=context.createBufferSource(); noise.buffer=noiseBuffer; noise.loop=true;
+    const filter=context.createBiquadFilter(); filter.type="bandpass"; filter.frequency.value=1100; filter.Q.value=0.8;
+    const noiseGain=context.createGain(); noiseGain.gain.value=0; noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(bus); noise.start();
+
+    let kind="",active=false;
+    const update=(nextKind, enabled, muted)=>{
+      kind=nextKind||"";
+      active=!!kind && enabled && !muted;
+      const at=context.currentTime;
+      bus.gain.setTargetAtTime(active?1:0,at,0.18);
+      if(kind==="meme-factory"){
+        humGain.gain.setTargetAtTime(active?0.028:0,at,0.12);
+        buzzGain.gain.setTargetAtTime(active?(0.006+0.003*(0.5+0.5*Math.sin(at*1.7))):0,at,0.12);
+        noiseGain.gain.setTargetAtTime(active?(0.008+0.004*(0.5+0.5*Math.sin(at*2.3))):0,at,0.12);
+        hum.frequency.setTargetAtTime(44+Math.sin(at*0.8)*2,at,0.08);
+        buzz.frequency.setTargetAtTime(90+Math.sin(at*3.2)*7,at,0.08);
+      } else {
+        humGain.gain.setTargetAtTime(0,at,0.12);
+        buzzGain.gain.setTargetAtTime(0,at,0.12);
+        noiseGain.gain.setTargetAtTime(0,at,0.12);
+      }
+    };
+    return {
+      update,
+      get stats(){ return {kind,active,gain:bus.gain.value}; },
+      dispose:()=>{ for(const src of [hum,buzz,noise]){ try{src.stop();}catch{} src.disconnect(); } filter.disconnect(); humGain.disconnect(); buzzGain.disconnect(); noiseGain.disconnect(); bus.disconnect(); }
+    };
+  };
+
   const create = () => {
     let context = null, master = null, musicGain = null, speechGain = null, voice = null, music = null, disposed = false;
     let muted = false, progress = 0, next = 0, queued = 0, musicVersion = 0, cue = -1, outdoors = false, stepAt = 0, stepSide = 0, steps = 0, ready = false, duration = 7, failure = "";
-    let foot = null, footGain = null, ambience = null;
+    let foot = null, footGain = null, ambience = null, interiorAmbience = null, interiorKind = "";
     let radioVolume = 0.075;
     let musicEnabled = true, ambientEnabled = true, hidden = false, radio = null, radioTimer = 0, radioWatchdog = 0, radioEpoch = 0, radioStatus = "Radio starts outdoors";
-    const radioWanted = () => outdoors && musicEnabled && !muted && !hidden && !disposed;
+    const radioWanted = () => outdoors && !interiorKind && musicEnabled && !muted && !hidden && !disposed;
     const stopRadio = () => {
       radioEpoch++; clearTimeout(radioTimer); clearTimeout(radioWatchdog); radioTimer = radioWatchdog = 0;
       if (radio) { radio.onplaying = radio.onerror = radio.onended = radio.onwaiting = null; radio.pause(); radio.removeAttribute("src"); radio.load(); }
@@ -97,10 +137,10 @@
     };
     const syncRadio = () => {
       if (radioWanted()) startRadio();
-      else { stopRadio(); radioStatus = !outdoors ? "Radio starts outdoors" : !musicEnabled ? "Music off" : muted ? "All sound muted" : "Radio paused"; }
+      else { stopRadio(); radioStatus = interiorKind ? "Outside radio unavailable indoors" : !outdoors ? "Radio starts outdoors" : !musicEnabled ? "Music off" : muted ? "All sound muted" : "Radio paused"; }
     };
     const clips = [null, null, null, null], versions = new Uint32Array(4), fired = new Uint8Array(4), triggers = new Float64Array([0.2, 0.4, 0.6, 0.8]);
-    const mix = () => musicGain.gain.setTargetAtTime((outdoors || !musicEnabled ? 0 : 0.015 + progress * progress * 0.11) * (voice ? 0.144 : 1), context.currentTime, voice ? 0.025 : 0.35);
+    const mix = () => musicGain.gain.setTargetAtTime((outdoors || interiorKind || !musicEnabled ? 0 : 0.015 + progress * progress * 0.11) * (voice ? 0.144 : 1), context.currentTime, voice ? 0.025 : 0.35);
     const startMusic = (buffer) => {
       if (music) { music.stop(); music.disconnect(); }
       music = context.createBufferSource(); music.buffer = buffer; music.loop = true; music.connect(musicGain); music.start();
@@ -141,6 +181,7 @@
       footGain = context.createGain(); footGain.gain.value = 0;
       foot.connect(footGain); footGain.connect(master); foot.start();
       if (outdoors) ambience = createAmbience(context, master);
+      if (interiorKind) interiorAmbience = createInteriorAmbience(context, master);
       preload();
     };
     const gesture = () => { ensure(); if (context && context.state === "suspended") context.resume().catch(() => {}); };
@@ -199,7 +240,26 @@
       const volume = 0.04 + 0.16 / (1 + (distance / 12) ** 2);
       radioVolume += (volume - radioVolume) * (1 - Math.exp(-Math.max(0, dt) * 4));
       if (radio) radio.volume = radioVolume;
-      if (ambience) ambience.update(camera, boat, outdoors && ambientEnabled, muted); }, get ambience() { return ambience ? ambience.stats : null; }, arrive: () => { outdoors = true; if (context) { if (!ambience) ambience = createAmbience(context, master); mix(); } syncRadio(); }, toggleMusic: () => { gesture(); musicEnabled = !musicEnabled; if (context) mix(); syncRadio(); }, toggleAmbient: () => { gesture(); ambientEnabled = !ambientEnabled; }, playRadio: () => { gesture(); musicEnabled = true; syncRadio(); }, get musicEnabled() { return musicEnabled; }, get ambientEnabled() { return ambientEnabled; }, get radioStatus() { return radioStatus; }, get cue() { return cue; }, get musicDuration() { return music ? music.buffer.duration : 0; }, get levels() { return { music: musicGain ? musicGain.gain.value : 0, speech: speechGain ? speechGain.gain.value : 0, footsteps: footGain ? footGain.gain.value : 0, steps }; }, get ready() { return ready; }, get duration() { return duration; }, get durations() { return clips.map((clip) => clip ? clip.duration : 0); }, get failure() { return failure; }, visibility: (value) => { hidden = value; syncRadio(); if (!context) return; if (hidden) context.suspend().catch(() => {}); else context.resume().catch(() => {}); }, get pending() { return !muted && (!!voice || next < queued && !!context); }, get muted() { return muted; }, toggle: () => {
+      if (ambience) ambience.update(camera, boat, outdoors && !interiorKind && ambientEnabled, muted);
+      if (interiorAmbience) interiorAmbience.update(interiorKind, ambientEnabled, muted);
+    }, get ambience() { return ambience ? ambience.stats : null; }, get interiorAmbience() { return interiorAmbience ? interiorAmbience.stats : null; },
+    arrive: () => { outdoors = true; if (context) { if (!ambience) ambience = createAmbience(context, master); mix(); } syncRadio(); },
+    enterInterior: (kind) => {
+      interiorKind = kind || "";
+      if (context) {
+        if (!interiorAmbience) interiorAmbience = createInteriorAmbience(context, master);
+        if (ambience) ambience.update({position:{x:0,y:0,z:0},target:{x:0,y:0,z:1}}, {x:0,y:0,z:0}, false, muted);
+        interiorAmbience.update(interiorKind, ambientEnabled, muted);
+        mix();
+      }
+      syncRadio();
+    },
+    leaveInterior: () => {
+      interiorKind = "";
+      if (context && interiorAmbience) interiorAmbience.update("", false, muted);
+      if (context) mix();
+      syncRadio();
+    }, toggleMusic: () => { gesture(); musicEnabled = !musicEnabled; if (context) mix(); syncRadio(); }, toggleAmbient: () => { gesture(); ambientEnabled = !ambientEnabled; if (interiorAmbience) interiorAmbience.update(interiorKind, ambientEnabled, muted); }, playRadio: () => { gesture(); musicEnabled = true; syncRadio(); }, get musicEnabled() { return musicEnabled; }, get ambientEnabled() { return ambientEnabled; }, get radioStatus() { return radioStatus; }, get cue() { return cue; }, get musicDuration() { return music ? music.buffer.duration : 0; }, get levels() { return { music: musicGain ? musicGain.gain.value : 0, speech: speechGain ? speechGain.gain.value : 0, footsteps: footGain ? footGain.gain.value : 0, steps }; }, get ready() { return ready; }, get duration() { return duration; }, get durations() { return clips.map((clip) => clip ? clip.duration : 0); }, get failure() { return failure; }, visibility: (value) => { hidden = value; syncRadio(); if (!context) return; if (hidden) context.suspend().catch(() => {}); else context.resume().catch(() => {}); }, get pending() { return !muted && (!!voice || next < queued && !!context); }, get muted() { return muted; }, toggle: () => {
       gesture(); muted = !muted;
       if (muted && voice) { voice.onended = null; voice.stop(); voice.disconnect(); voice = null; next = queued; }
       if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5, context.currentTime, 0.03);
@@ -210,6 +270,7 @@
       if (voice) { voice.onended = null; voice.stop(); voice.disconnect(); } if (music) { music.stop(); music.disconnect(); }
       if (foot) { foot.stop(); foot.disconnect(); footGain.disconnect(); }
       if (ambience) { ambience.dispose(); ambience = null; }
+      if (interiorAmbience) { interiorAmbience.dispose(); interiorAmbience = null; }
       if (context) context.close().catch(() => {});
       clips.fill(null); context = master = musicGain = speechGain = voice = music = foot = footGain = null;
     } };
