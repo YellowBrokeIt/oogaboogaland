@@ -351,12 +351,33 @@
     addNatureBatch(root,plainNature);
     addNatureBatch(root,coastNature);
 
-    // Switchback trail is intentionally long: distinct overlooks, ruins and olive foothills.
+    // Switchback trail hugs Olympus instead of floating in the air.
+    // Each tread gets a rocky mountain shoulder down to the existing terrain beneath it.
+    const mountainTopAt=(x,z)=>{
+      let top=0;
+      for(const [dx,cy,dz,w,h,d] of tiers){
+        const cx=ox+dx, cz=oz+dz;
+        if(Math.abs(x-cx)<=w/2 && Math.abs(z-cz)<=d/2) top=Math.max(top,cy+h/2);
+      }
+      return top;
+    };
     for(let i=0;i<TRAIL.length-1;i++){
-      const a=TRAIL[i],b=TRAIL[i+1],distance=Math.hypot(b[0]-a[0],b[1]-a[1]),steps=Math.max(4,Math.ceil(distance/0.75));
+      const a=TRAIL[i],b=TRAIL[i+1],dx=b[0]-a[0],dz=b[1]-a[1];
+      const distance=Math.hypot(dx,dz), steps=Math.max(4,Math.ceil(distance/0.75)), heading=Math.atan2(dx,dz);
       for(let j=0;j<=steps;j++){
-        const t=j/steps,x=a[0]+(b[0]-a[0])*t,z=a[1]+(b[1]-a[1])*t,y=a[2]+(b[2]-a[2])*t;
-        block(root,j%4?"#cdbd9f":"#e1d0ae",x,y-0.12,z,4.8,0.24,0.9);
+        const t=j/steps,x=a[0]+dx*t,z=a[1]+dz*t,y=a[2]+(b[2]-a[2])*t;
+        const base=mountainTopAt(x,z), support=Math.max(0,y-base);
+        if(support>0.28){
+          const rockColor=y>36?"#aaa091":y>24?"#8c8278":y>12?"#756d64":"#8b806e";
+          const bed=block(root,rockColor,x,base+support/2-0.08,z,7.2,support+0.16,3.4);
+          bed.rotation.y=heading;
+          if((j+i*3)%7===0){
+            const side=(j&1)?1:-1, sx=x+Math.cos(heading)*side*3.7, sz=z-Math.sin(heading)*side*3.7;
+            block(root,"#6c665f",sx,base+Math.min(support,2.2)/2,sz,2.4,Math.min(support,2.2),2.0).rotation.y=heading;
+          }
+        }
+        const tread=block(root,j%4?"#cdbd9f":"#e1d0ae",x,y+0.03,z,5.2,0.26,1.2);
+        tread.rotation.y=heading;
       }
     }
     for(const [x,y,z] of [[-60,41,-21],[-38,29,-7],[-26,21,5],[-13,12,14]]){
