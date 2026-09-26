@@ -180,7 +180,21 @@
     window.addEventListener("pointerup", gesture); window.addEventListener("touchend", gesture);
     // A click through the hub has already activated audio; direct visits wait for input.
     ensure();
-    return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60, source = null) => {
+    const skipTransition = () => {
+      // Cancel only the entrance/transition tracks. Outdoor ambience/radio may start normally after arrival.
+      fired.fill(1); queued = next = clips.length; progress = 1;
+      if (voice) { voice.onended = null; try { voice.stop(); } catch {} voice.disconnect(); voice = null; }
+      if (music) { try { music.stop(); } catch {} music.disconnect(); music = null; }
+      if (footGain && context) {
+        const at = context.currentTime;
+        footGain.gain.cancelScheduledValues(at); footGain.gain.setValueAtTime(0, at);
+      }
+      if (musicGain && context) {
+        const at = context.currentTime;
+        musicGain.gain.cancelScheduledValues(at); musicGain.gain.setValueAtTime(0, at);
+      }
+    };
+    return { update, gesture, skipTransition, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60, source = null) => {
       const p = camera.position, distance = source ? Math.hypot(p.x - source.x, p.y - source.y, p.z - source.z) : Infinity;
       const volume = 0.04 + 0.16 / (1 + (distance / 12) ** 2);
       radioVolume += (volume - radioVolume) * (1 - Math.exp(-Math.max(0, dt) * 4));
