@@ -17,10 +17,10 @@
     { t: 1.6,  p: [-52, 53.2, -42], q: [-48, 48, -27] },
     { t: 3.4,  p: [-47, 47, -25], q: [-36, 34, -7] },
     { t: 5.5,  p: [-24, 30, -6], q: [-8, 15, 18] },
-    { t: 7.8,  p: [50, 12, 10], q: [12, 7, 35] },
-    { t: 10.0, p: [72, 8, 64], q: [20, 5, 72] },
-    { t: 12.3, p: [38, 10, 126], q: [12, 8, 48] },
-    { t: 15.0, p: [8, 48, 255], q: [-8, 14, 20] }
+    { t: 7.8,  p: [64, 14, 12], q: [26, 8, 40] },
+    { t: 10.0, p: [88, 9, 72], q: [40, 5, 76] },
+    { t: 12.3, p: [48, 11, 142], q: [28, 8, 54] },
+    { t: 15.0, p: [18, 56, 285], q: [8, 15, 28] }
   ];
   const START = 0, WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
@@ -79,7 +79,7 @@
   const cameraEnabled = () => phase === "land" && !exiting && !transitGate.isOpen && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
-  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 108 - radius
+  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 122 - radius
     && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
     && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius));
   const walkable = (ax, az, bx, bz, y, height, actor) => {
@@ -99,7 +99,7 @@
   const clampTarget = (p) => {
     const radius = Math.hypot(p.x, p.z);
     if (avatarView && !pilot?.player) p.y = 1.7;
-    if (radius > 108) { p.x *= 108 / radius; p.z *= 108 / radius; }
+    if (radius > 122) { p.x *= 122 / radius; p.z *= 122 / radius; }
     // Keep only real landmark footprints solid; mountain travel is governed by the authored trail height.
     if (land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z))) { p.x = previous.x; p.z = previous.z; }
     previous.x = p.x; previous.z = p.z;
