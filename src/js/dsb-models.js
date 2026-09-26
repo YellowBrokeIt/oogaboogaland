@@ -88,11 +88,11 @@
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    // Wrap around Olympus, then continue across the mountain's right flank to the blue-marked open plain.
-    [-52,-42,50],[-63,-38,48],[-72,-31,46],[-76,-21,43],[-72,-11,40],
-    [-64,-2,37],[-53,3,34],[-42,3,31],[-31,-1,28],[-21,-7,24],
-    [-10,-11,20],[1,-12,16],[11,-10,12],[20,-8,9],[30,-7,7],[40,-6,5],
-    [50,-5,4],[60,-4,3],[68,-3,2]
+    // Back-side route: circle Olympus on the sea/cliff side first, then curl down its right flank.
+    [-52,-42,50],[-60,-49,48],[-58,-58,46],[-48,-64,44],[-36,-65,41],
+    [-24,-61,38],[-15,-54,35],[-10,-44,32],[-9,-34,29],[-5,-27,26],
+    [2,-23,22],[10,-20,18],[18,-18,14],[27,-16,10],[36,-14,7],
+    [44,-12,4],[52,-10,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -264,9 +264,14 @@
     const terrain=createNode({ geometry:disc(V2.radius,2.4,"#8b765d") }); addChild(root,terrain);
     const turtle=createNode(); addChild(root,turtle);
 
-    // Broad sandy shelves define the inhabited two-thirds of the island.
-    for(let i=0;i<64;i++){
-      const a=-2.35+i*(4.7/63), r=V2.radius-3+(i%3)*0.65;
+    // Sandy beach only fronts the inhabited coast. Olympus' back side is a hard rocky island edge.
+    // Skip the north-west / rear arc behind the mountain entirely.
+    for(let i=0;i<72;i++){
+      const a=-2.45+i*(4.9/71);
+      const deg=((a*180/Math.PI)%360+360)%360;
+      const rearOlympus = deg>190 && deg<285;
+      if(rearOlympus) continue;
+      const r=V2.radius-3+(i%3)*0.65;
       const beach=block(root,i%2?"#e8d4a6":"#f3dfb3",Math.sin(a)*r,-0.18,Math.cos(a)*r,7.5,0.3,5.2);
       beach.rotation.y=a;
       if(i%2===0){
@@ -282,6 +287,18 @@
       [2,27,-7,36,7,31,"#908478"],[1,34,-7,27,7,23,"#9f9284"],[0,40,-7,19,6,16,"#aea08f"],[0,46,-7,12,5,10,"#bcae9a"]
     ];
     for(const [dx,y,dz,w,h,d,color] of tiers) block(root,color,ox+dx,y,oz+dz,w,h,d);
+
+    // Olympus is the island edge on its rear side: no beach strip, no sandy gap behind it.
+    const rearCliff=[
+      [-57,4,-78,48,8,26,"#5f5b56"],[-70,7,-91,34,14,22,"#56534f"],[-84,10,-101,25,20,18,"#4f4d49"],
+      [-40,5,-83,30,10,24,"#69635d"],[-27,4,-91,23,8,20,"#716a61"]
+    ];
+    for(const [x,y,z,w,h,d,color] of rearCliff) block(root,color,x,y,z,w,h,d);
+    // Ragged cliff toes descend straight into the Aegean.
+    for(const [x,z,w,d,h] of [[-92,-103,16,14,16],[-76,-112,18,12,12],[-57,-116,20,10,9],[-36,-110,17,12,8]]){
+      block(root,"#4b4946",x,h/2-1.0,z,w,h,d);
+      block(root,"#68615a",x+2,h-0.8,z+1,w*0.62,1.4,d*0.7);
+    }
 
     // Summit Portara frame around the actual Ooga Portal destination.
     const px=V2.summit.x,py=V2.summit.y,pz=V2.summit.z;
@@ -341,9 +358,9 @@
     natureBox(plainNature,"#e2d5bd",48,3.35,8,3.1,0.35,2.2);
 
     // Coastal texture: low scrub, beach grass and rock groupings away from the promenade.
-    for(const [x,z] of [[-50,94],[-42,101],[-35,88],[88,75],[96,67],[101,58],[-70,72],[-78,63]])
+    for(const [x,z] of [[-50,94],[-42,101],[-35,88],[88,75],[96,67],[101,58],[-18,112],[5,116]])
       addGrassPatch(coastNature,x,0,z,1.8);
-    for(const [x,z,sc] of [[-58,102,0.8],[-46,109,0.65],[92,83,0.7],[103,70,0.8],[-82,55,0.7]])
+    for(const [x,z,sc] of [[-58,102,0.8],[-46,109,0.65],[92,83,0.7],[103,70,0.8],[15,112,0.7]])
       addRockCluster(coastNature,x,0,z,sc);
     for(const [x,z] of [[-68,89],[-55,83],[93,61],[84,72]]) addShrub(coastNature,x,0,z,1.05,false);
 
@@ -353,32 +370,39 @@
     addNatureBatch(root,plainNature);
     addNatureBatch(root,coastNature);
 
-    // Switchback trail hugs Olympus instead of floating in the air.
-    // Each tread gets a rocky mountain shoulder down to the existing terrain beneath it.
+    // Switchback trail is carved into a continuous Olympus shoulder: no air gap between path and mountain.
     const mountainTopAt=(x,z)=>{
       let top=0;
       for(const [dx,cy,dz,w,h,d] of tiers){
         const cx=ox+dx, cz=oz+dz;
         if(Math.abs(x-cx)<=w/2 && Math.abs(z-cz)<=d/2) top=Math.max(top,cy+h/2);
       }
+      // Rear cliff/cape counts as Olympus terrain too.
+      for(const [cx,cy,cz,w,h,d] of rearCliff)
+        if(Math.abs(x-cx)<=w/2 && Math.abs(z-cz)<=d/2) top=Math.max(top,cy+h/2);
       return top;
     };
     for(let i=0;i<TRAIL.length-1;i++){
       const a=TRAIL[i],b=TRAIL[i+1],dx=b[0]-a[0],dz=b[1]-a[1];
-      const distance=Math.hypot(dx,dz), steps=Math.max(4,Math.ceil(distance/0.75)), heading=Math.atan2(dx,dz);
+      const distance=Math.hypot(dx,dz), steps=Math.max(5,Math.ceil(distance/0.65)), heading=Math.atan2(dx,dz);
       for(let j=0;j<=steps;j++){
         const t=j/steps,x=a[0]+dx*t,z=a[1]+dz*t,y=a[2]+(b[2]-a[2])*t;
-        const base=mountainTopAt(x,z), support=Math.max(0,y-base);
-        if(support>0.28){
-          const rockColor=y>36?"#aaa091":y>24?"#8c8278":y>12?"#756d64":"#8b806e";
-          const bed=block(root,rockColor,x,base+support/2-0.08,z,7.2,support+0.16,3.4);
-          bed.rotation.y=heading;
-          if((j+i*3)%7===0){
-            const side=(j&1)?1:-1, sx=x+Math.cos(heading)*side*3.7, sz=z-Math.sin(heading)*side*3.7;
-            block(root,"#6c665f",sx,base+Math.min(support,2.2)/2,sz,2.4,Math.min(support,2.2),2.0).rotation.y=heading;
-          }
-        }
-        const tread=block(root,j%4?"#cdbd9f":"#e1d0ae",x,y+0.03,z,5.2,0.26,1.2);
+        const base=mountainTopAt(x,z), support=Math.max(0.4,y-base);
+        const rockColor=y>36?"#aaa091":y>24?"#8c8278":y>12?"#756d64":"#8b806e";
+
+        // Wide rocky bench directly under the path.
+        const bed=block(root,rockColor,x,base+support/2-0.05,z,10.5,support+0.25,4.8);
+        bed.rotation.y=heading;
+
+        // Bridge from the trail inward toward Olympus' body, overlapping the mountain so no slit of sky can appear.
+        const vx=ox-x, vz=oz-z, vd=Math.hypot(vx,vz) || 1;
+        const reach=Math.min(11,Math.max(4.5,vd-18));
+        const nx=vx/vd, nz=vz/vd, cx=x+nx*reach/2, cz=z+nz*reach/2;
+        const shoulder=block(root,rockColor,cx,base+support/2-0.08,cz,reach+4.5,support+0.3,7.2);
+        shoulder.rotation.y=Math.atan2(nx,nz)+Math.PI/2;
+
+        // Tread sits slightly embedded into the rocky shelf.
+        const tread=block(root,j%4?"#cdbd9f":"#e1d0ae",x,y-0.02,z,5.4,0.28,1.35);
         tread.rotation.y=heading;
       }
     }
@@ -472,16 +496,15 @@
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // Trail exit clearing: the actual end now sits in the blue-marked open plain, well right of Olympus.
-    block(root,"#8f8a66",70,0.12,-2,34,0.24,24);
-    for(const [x,z] of [[58,-10],[61,4],[76,-10],[82,3]]){
+    // Trail exit clearing: right of Olympus, after the full back-side/right-flank descent.
+    block(root,"#8f8a66",54,0.12,-8,32,0.24,22);
+    for(const [x,z] of [[43,-16],[45,1],[60,-16],[66,0]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    // CHORA sign stands at the end of the trail and points the player toward the town beyond the open ground.
-    block(root,"#8d6d43",70,1.7,-2,0.45,3.4,0.45);
-    block(root,"#8d6d43",74,2.4,-2,8,0.35,0.7);
-    sign(root,"CHORA",74,2.72,-1.6,0.62,"#f3e3a0");
+    block(root,"#8d6d43",55,1.7,-8,0.45,3.4,0.45);
+    block(root,"#8d6d43",59,2.4,-8,8,0.35,0.7);
+    sign(root,"CHORA",59,2.72,-7.6,0.62,"#f3e3a0");
 
     // Chora lanes: dark island-stone paving with pale joints, tighter and more irregular than the open island roads.
     const townLanes=[[28,54,82,4],[30,42,4,52],[8,62,4,46],[47,72,56,4],[30,28,76,4],[60,48,4,46],[16,79,46,4]];
