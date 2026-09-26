@@ -274,6 +274,7 @@
     if (name === "leave") returnHub();
     else if (name === "dsb-context") act();
     else if (name === "dsb-banana") buy("banana");
+    else if (name === "dsb-skip-entry" && phase === "entrance") reveal();
     else if (name === "dsb-skip") finishArrival();
     else if (name === "dsb-start-audio") audio.gesture();
     else if (name === "dsb-panel") { panel.dataset.folded = String(panel.dataset.folded !== "true"); document.getElementById("dsb-toggle").setAttribute("aria-expanded", String(panel.dataset.folded !== "true")); document.getElementById("dsb-toggle").textContent = panel.dataset.folded === "true" ? "Show DSB menu" : "Hide DSB menu"; }
@@ -475,6 +476,7 @@
       menuHint: "Cross the active Ooga Portal from DSB Land to return to OogaBoogaLand.",
       onMenu: () => { syncPlayer(); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
       onTraverse: id => { if (phase === "entrance") reveal(); else if (id === "hub") departGate(); } });
+    M.portaraFrame(transitGate.root, transitGate.radius || 2.2);
     addChild(root, transitGate.root);
     const playerName = world.pilot || "YellowBrokeIt";
     world.pilot = playerName;
