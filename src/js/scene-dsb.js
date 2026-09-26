@@ -6,13 +6,26 @@
   const { clamp } = BL.math;
   const M = BL.dsbModels, N = 192, TAU = Math.PI * 2;
   let RAIL_GEOMETRY, SUPPORT_GEOMETRY;
-  const VIEW = { yaw: 0, pitch: 0.28, dist: 6, target: { x: 0, y: 1.7, z: 26 }, position: { x: 0, y: 0, z: 26 } };
-  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 0, y: 1.7, z: 33 }, position: { x: 0, y: 0, z: 33 } };
-  const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: 7, y: 1.7, z: 24 }, position: { x: 7, y: 0, z: 24 } };
-  const START = Math.asin(7 / 31), WAIT = 8;
+  const OLYMPUS_GATE = { x: -52, y: 52, z: -48 };
+  const SUMMIT_SPAWN = { x: -52, y: 50, z: -42 };
+  const VIEW = { yaw: Math.PI, pitch: 0.25, dist: 6, target: { x: -52, y: 51.7, z: -38 }, position: { x: -52, y: 50, z: -42 } };
+  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 18, y: 1.7, z: 93 }, position: { x: 18, y: 0, z: 93 } };
+  const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: -34, y: 1.7, z: -20 }, position: { x: -34, y: 0, z: -20 } };
+  const FLYOVER_SECONDS = 15, GLORY_HOLD_SECONDS = 4, ARRIVAL_SECONDS = FLYOVER_SECONDS + GLORY_HOLD_SECONDS;
+  const ARRIVAL_KEYS = [
+    { t: 0.0,  p: [-52, 53.5, -48], q: [-52, 51.5, -36] },
+    { t: 1.6,  p: [-52, 53.2, -42], q: [-48, 48, -27] },
+    { t: 3.4,  p: [-47, 47, -25], q: [-36, 34, -7] },
+    { t: 5.5,  p: [-24, 30, -6], q: [-8, 15, 18] },
+    { t: 7.8,  p: [50, 12, 10], q: [12, 7, 35] },
+    { t: 10.0, p: [72, 8, 64], q: [20, 5, 72] },
+    { t: 12.3, p: [38, 10, 126], q: [12, 8, 48] },
+    { t: 15.0, p: [8, 48, 255], q: [-8, 14, 20] }
+  ];
+  const START = 0, WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
-  const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
+  const RENDER = { clear: [0.28, 0.62, 0.9], horizon: [0.48, 0.78, 0.98], zenith: [0.08, 0.38, 0.78], sky: [0.62, 0.82, 1], ground: [0.42, 0.38, 0.31], sun: [1, 0.95, 0.82], light: { x: -0.35, y: 0.88, z: 0.32 }, stars: 0, shadowCenter: { x: -12, y: 12, z: 18 }, shadowExtent: 135, bloomStrength: 0.28, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
   let root, camera, input, pilot, hud, renderer, world, game, go, land, transitGate, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu, conversation;
   let exiting = false;
@@ -29,7 +42,7 @@
   const dsbScene = { id: "dsb", root: null, camera: null, input: null, debug: null, renderOpts: DARK, get inMotion() { return true; } };
   const point = (a, out) => {
     const f = ((a % TAU + TAU) % TAU) / TAU * N, i = Math.floor(f), t = f - i;
-    out.x = Math.sin(a) * 31; out.z = Math.cos(a) * 31;
+    out.x = -34 + Math.sin(a) * 12; out.z = -20 + Math.cos(a) * 8;
     out.y = railY[i] * (1 - t) + railY[(i + 1) % N] * t;
   };
   const buildRide = () => {
@@ -66,11 +79,9 @@
   const cameraEnabled = () => phase === "land" && !exiting && !transitGate.isOpen && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
-  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
+  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 108 - radius
     && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
-    && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius))
-    && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
-      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius);
+    && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius));
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
     for (let i = 1; i <= steps; i++) if (!clearAt(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, actor.bodyRadius)) return false;
@@ -88,9 +99,9 @@
   const clampTarget = (p) => {
     const radius = Math.hypot(p.x, p.z);
     if (avatarView && !pilot?.player) p.y = 1.7;
-    if (radius > 35) { p.x *= 35 / radius; p.z *= 35 / radius; }
-    // Solid landmark footprints; each attempted step keeps its last clear position.
-    if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z)) || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
+    if (radius > 108) { p.x *= 108 / radius; p.z *= 108 / radius; }
+    // Keep only real landmark footprints solid; mountain travel is governed by the authored trail height.
+    if (land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z))) { p.x = previous.x; p.z = previous.z; }
     previous.x = p.x; previous.z = p.z;
   };
   const clampCamera = (p) => { p.y = clamp(p.y, 0.5, 75); };
@@ -117,30 +128,34 @@
     if (phase !== "arrival") return;
     transitGate.finishReceiving();
     phase = "land"; panel.dataset.phase = phase; document.body.classList.remove("dsb-arrival");
-    previous.x = 0; previous.z = 26; pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
+    avatar.root.position.x = SUMMIT_SPAWN.x; avatar.root.position.y = SUMMIT_SPAWN.y + avatar.baseY; avatar.root.position.z = SUMMIT_SPAWN.z;
+    avatar.root.rotation.y = 0; previous.x = SUMMIT_SPAWN.x; previous.z = SUMMIT_SPAWN.z;
+    pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
     avatarView = true; hud.setAct("USE"); hud.el.act.hidden = false;
+    toast("Descend Olympus toward Chora and the Aegean.");
+  };
+  const cameraKey = (a, b, t) => {
+    const f = smooth((t - a.t) / Math.max(0.0001, b.t - a.t));
+    camera.position.x = a.p[0] + (b.p[0] - a.p[0]) * f;
+    camera.position.y = a.p[1] + (b.p[1] - a.p[1]) * f;
+    camera.position.z = a.p[2] + (b.p[2] - a.p[2]) * f;
+    camera.target.x = a.q[0] + (b.q[0] - a.q[0]) * f;
+    camera.target.y = a.q[1] + (b.q[1] - a.q[1]) * f;
+    camera.target.z = a.q[2] + (b.q[2] - a.q[2]) * f;
   };
   const arrivalCamera = () => {
-    const t = arrivalTime;
-    let x = 0, y, z, ty, tz;
-    if (t < 2.5) {
-      const f = smooth(t / 2.5); y = 3.36 + (46 - 3.36) * f; z = 31.77 + (85 - 31.77) * f; ty = 1.7 - 5.7 * f; tz = 26 * (1 - f);
-    } else if (t < 10.5) {
-      const a = smooth((t - 2.5) / 8) * TAU;
-      x = Math.sin(a) * 85; z = Math.cos(a) * 85; y = 8 + Math.cos(a) * 38; ty = -4; tz = 0;
-    } else {
-      const f = smooth((t - 10.5) / 2.5); y = 46 + (3.36 - 46) * f; z = 85 + (31.77 - 85) * f; ty = -4 + 5.7 * f; tz = 26 * f;
-    }
-    camera.position.x = x; camera.position.y = y; camera.position.z = z;
-    camera.target.x = 0; camera.target.y = ty; camera.target.z = tz;
+    const t = clamp(arrivalTime, 0, FLYOVER_SECONDS);
+    let i = 0;
+    while (i < ARRIVAL_KEYS.length - 2 && t > ARRIVAL_KEYS[i + 1].t) i++;
+    cameraKey(ARRIVAL_KEYS[i], ARRIVAL_KEYS[i + 1], t);
   };
   const reveal = () => {
     if (phase !== "entrance") return;
-    // Only the consumed backside crossing may construct the land.
     progress = 1; buildLand();
     phase = "arrival"; arrivalTime = 0; flash = 1; dsbScene.renderOpts = RENDER;
-    transitGate.root.position.z = 28;
-    avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 28; poseAvatar(false, 0);
+    Object.assign(transitGate.root.position, OLYMPUS_GATE);
+    avatar.root.position.x = SUMMIT_SPAWN.x; avatar.root.position.y = SUMMIT_SPAWN.y + avatar.baseY; avatar.root.position.z = SUMMIT_SPAWN.z;
+    avatar.root.rotation.y = 0; poseAvatar(false, 0);
     document.body.classList.remove("dsb-entry"); document.body.classList.add("dsb-arrival"); panel.dataset.phase = phase;
     audio.arrive(); arrivalCamera();
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finishArrival();
@@ -156,8 +171,8 @@
     if (trip.angle >= trip.start + TAU) { trip.angle = trip.start; trip.wait = WAIT; return true; }
     return false;
   };
-  const atDock = () => near(0, 34, 4.5);
-  const atStation = () => near(7, 24, 4.5);
+  const atDock = () => near(18, 93, 6);
+  const atStation = () => near(-34, -20, 5);
   const board = (kind) => {
     if (phase !== "land") return;
     const trip = kind === "boat" ? boatTrip : trainTrip;
@@ -239,7 +254,7 @@
     else if (nearLandmark("tv")) openTv();
     else if (nearLandmark("shop")) openShop();
     else if (nearZuzu()) conversation.open();
-    else if (near(-18, -10, 7)) perform();
+    else if (near(18, 27, 7)) perform();
     else throwTomato();
     return true;
   };
@@ -280,7 +295,7 @@
   };
   const playerAction = () => {
     if (!playerEnabled()) { if (phase === "boat" || phase === "coaster") act(); return true; }
-    if (contextAction() || near(-18, -10, 7)) { act(); return true; }
+    if (contextAction() || near(18, 27, 7)) { act(); return true; }
     return false;
   };
   const onKey = (event) => {
@@ -327,7 +342,12 @@
       return;
     }
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);
-    if (phase === "arrival") { arrivalTime += dt; avatar.root.position.z = 28 - 2 * smooth(arrivalTime / 0.6); poseAvatar(arrivalTime < 0.6, dt); arrivalCamera(); if (arrivalTime >= 13) finishArrival(); }
+    if (phase === "arrival") {
+      arrivalTime += dt;
+      avatar.root.position.z = SUMMIT_SPAWN.z + 1.2 * smooth(arrivalTime / 0.9);
+      poseAvatar(arrivalTime < 0.9, dt); arrivalCamera();
+      if (arrivalTime >= ARRIVAL_SECONDS) finishArrival();
+    }
     if (phase === "land") {
       avatar.root.visible = true;
       if (cameraEnabled()) {
@@ -343,12 +363,12 @@
     } else avatar.root.visible = phase === "arrival";
     agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
     zuzu.update(dt, time, agentPerception);
-    advanceTrip(boatTrip, dt); boatAngle = boatTrip.angle;
+    // V2 scale pass keeps the future catamarans moored; free-sail controls come next.
     for (let i = 0; i < land.boats.length; i++) {
-      const a = boatAngle - i * 0.13, b = land.boats[i];
-      b.position.x = Math.sin(a) * 40; b.position.z = Math.cos(a) * 40; b.position.y = -0.1 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = a + Math.PI / 2;
+      const b = land.boats[i];
+      b.position.x = 12 + i * 6; b.position.z = 101; b.position.y = -0.15 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = Math.PI;
     }
-    if (phase === "boat") rideCamera(land.boats[0].position, boatAngle + Math.PI / 2, 0);
+    if (phase === "boat") rideCamera(land.boats[0].position, Math.PI, 0);
     const arrived = advanceTrip(trainTrip, dt); rideAngle = trainTrip.angle;
     if (arrived || trainTrip.wait > 0 && data.state.revision !== savedRevision) buildRide();
     point(rideAngle, railPoint); point(rideAngle + 0.04, railAhead);
@@ -365,6 +385,7 @@
     fx.update(dt);
     land.landmarks.tv.point(-0.55, 3.3, 1.63, radioSource);
     audio.environment(camera, land.boats[0].position, dt, radioSource);
+    land.updateEnvironment?.(time, camera.position, phase === "arrival");
     for (let i = 0; i < land.falls.length; i++) { const f = land.falls[i]; f.glow = 0.55 + 0.2 * Math.sin(time * 3 + i * 0.4); f.scale.y = 7.5 + 0.5 * Math.sin(time * 1.7 + i); land.spray[i].position.y = -0.5 - (time * 4 + i * 0.71) % 11; }
     if (data.state.height !== lastHeight) { if (lastHeight) skyPulse = 1; lastHeight = data.state.height; }
     skyPulse = Math.max(0, skyPulse - dt * 0.25);
@@ -414,7 +435,7 @@
     if (land) return;
     land = M.build(); addChild(root, land.root);
     // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
-    Object.assign(transitGate.dialer.position, { x: transitGate.root.position.x + transitGate.outerRadius + 1.2, y: 0, z: VIEW.position.z + 1 });
+    Object.assign(transitGate.dialer.position, { x: OLYMPUS_GATE.x + transitGate.outerRadius + 1.4, y: SUMMIT_SPAWN.y, z: OLYMPUS_GATE.z + 3.2 });
     transitGate.dialer.rotation.y = Math.PI;
     addChild(land.root, transitGate.dialer); register(transitGate.dialer, "ooga-portal-dialer", "Ooga Portal dialer · OogaBoogaLand");
     transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
@@ -434,19 +455,19 @@
     buildRide();
     for (let i = 0; i < 6; i++) {
       const contributor = BL.contributors.roster[i % BL.contributors.roster.length], cave = BL.models.caveman(BL.contributors.traitsFor(contributor.name));
-      cave.baseY = cave.root.position.y; cave.floorY = i === 5 ? 1.1 : 0; cave.root.position.x = i === 5 ? -18 : -24 + i * 2.2; cave.root.position.z = i === 5 ? -15.6 : -6; cave.heading = i === 5 ? 0 : Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
+      cave.baseY = cave.root.position.y; cave.floorY = 0; cave.root.position.x = -4 + (i % 3) * 12; cave.root.position.z = 34 + Math.floor(i / 3) * 10; cave.heading = Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
       addChild(land.root, cave.root); visitors.push(cave); input.add(cave.root, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }, { radius: 1 }); targets.push(cave.root);
       for (const key of ["head", "torso", "armL", "armR", "legL", "legR"]) { const node = cave.parts[key]; input.add(node, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }); targets.push(node); }
     }
     for (let i = 0; i < 12; i++) { const node = M.block(land.root, "#ef4256", 0, 0, 0, 0.28, 0.28, 0.28); node.visible = false; shots.push({ node, life: 0, vx: 0, vy: 0, vz: 0, splat: false }); }
     register(land.tv, "tv", "DSB TV - walk closer to open");
     register(land.shop, "shop", "DSB meme stand · bread and tomatoes"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy");
-    RENDER.lights.set([-24, 5, -15, 14, 0.8, 0.25, 1, 0, -12, 5, -15, 14, 1, 0.8, 0.2, 0]);
+    RENDER.lights.set([18, 6, 78, 22, 1, 0.78, 0.42, 0, -52, 58, -48, 18, 0.7, 0.9, 1, 0]);
   };
   const enter = (ctx) => {
     ({ renderer, game, world, go } = ctx); disposed = false; exiting = false; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
     tokens = 20; bread = tomatoes = bananas = 0; boatTrip.angle = 0; trainTrip.angle = START; boatTrip.wait = trainTrip.wait = WAIT; rideYaw = ridePitch = 0; lastContext = "init"; throwAt = -1; fedUntil = 0; priceTimer = 0; savedRevision = -1; lastHeight = skyPulse = 0; lastPrice = lastBag = lastPrompt = "";
-    root = createNode(); camera = createCamera({ fov: 55, near: 0.1, far: 220 });
+    root = createNode(); camera = createCamera({ fov: 55, near: 0.1, far: 600 });
     land = data = tv = zuzu = conversation = null;
     // Local +Y faces inward (-Z); the passage approaches the back from +Z.
     // Seat the lower ring in the floor so standing body centres clear the aperture.
@@ -462,9 +483,9 @@
     hud = BL.hud.create({ roster: BL.contributors.roster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: false });
     oldSheetHidden = hud.el.sheet.hidden; oldSheetOpen = hud.el.sheet.dataset.open; hud.el.sheet.hidden = true; hud.el.sheet.dataset.open = "false"; hud.setJetpack(false, false, 1); hud.el.act.hidden = true;
     const hooks = {}; input = BL.interact.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: () => 0 } });
+    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 220, target: { x: 0, y: 8, z: 25 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 220], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.8, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: (x, z) => land?.groundAt(x, z) ?? 0 } });
     fx = BL.fx.create({ root, renderer, camera, overlay: ctx.overlay, hud, tickerAt: { x: 0, y: 2, z: 26 } });
-    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: () => 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact, onProjectileMove: projectileMove };
+    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: (x, z) => land?.groundAt(x, z) ?? 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact, onProjectileMove: projectileMove };
     crew = BL.crew.create(shared); shared.crew = crew; pilot.bind(shared);
     avatar = crew.cavemen.get(playerName); crew.collectMagazine(avatar); avatar.root.rotation.y = Math.PI;
     for (const key of Object.keys(pilot.hooks)) { const hook = pilot.hooks[key]; hooks[key] = (...args) => { if (cameraEnabled() && key !== "onDoubleTap") return hook(...args);
