@@ -29,6 +29,18 @@
     return node;
   };
   const disc = (r, depth, color) => cached(`dsb-disc-${r}-${depth}-${color}`, () => lathe({ profile: [[0, -depth], [r, -depth], [r, 0], [0, 0]], segments: 64, color }));
+  // DSB's Ooga Portal is the Portara itself: a monumental marble doorway around the liquid horizon.
+  // This frame is authored in portal-local space. A vertical portal rotates the local Z axis upright.
+  const portaraFrame = (parent, radius = 2.2) => {
+    const half = radius + 1.45, height = radius * 2 + 3.0, stone = "#f3eee4", cap = "#fff9ef";
+    block(parent, stone, -half, 0, height * 0.5 - 0.35, 1.25, 1.45, height);
+    block(parent, stone,  half, 0, height * 0.5 - 0.35, 1.25, 1.45, height);
+    block(parent, cap, 0, 0, height - 0.2, half * 2 + 1.3, 1.5, 1.25);
+    block(parent, "#d8c7aa", 0, 0, -0.55, half * 2 + 2.1, 1.75, 0.7);
+    // Tiny uneven marble feet keep it feeling like an ancient surviving doorway, not a sci-fi ring mount.
+    block(parent, "#dfd2bd", -half, 0, -0.15, 1.65, 1.7, 0.55);
+    block(parent, "#dfd2bd",  half, 0, -0.15, 1.65, 1.7, 0.55);
+  };
   const boat = () => {
     const root = createNode();
     block(root, C.yellow, 0, 0, 0, 2.2, 0.65, 4);
@@ -258,5 +270,5 @@
       houses, groundAt, trailAt, updateEnvironment, v2:V2
     };
   };
-  BL.dsbModels = { C, cube, block, text, sign, boat, build };
+  BL.dsbModels = { C, cube, block, text, sign, portaraFrame, boat, build };
 })();
