@@ -66,16 +66,17 @@
     }
   });
   const V2 = {
-    radius: 112,
-    oceanRadius: 420,
+    radius: 126,
+    oceanRadius: 460,
     summit: { x: -52, y: 52, z: -48 },
-    chora: { x: 10, z: 12 },
+    chora: { x: 24, z: 20 },
     harbor: { x: 18, z: 93 },
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    [-52,-42,50],[-49,-34,47],[-55,-24,43],[-46,-14,38],[-38,-6,32],
-    [-30,1,26],[-22,8,20],[-14,13,14],[-5,16,9],[4,16,5],[10,14,2]
+    [-52,-42,50],[-47,-35,47],[-57,-28,44],[-48,-21,41],[-58,-13,37],
+    [-47,-7,34],[-39,0,30],[-46,7,26],[-35,12,22],[-27,18,18],
+    [-16,22,14],[-6,27,10],[4,31,7],[13,34,4],[21,36,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -152,40 +153,61 @@
 
     // Chora: dense, irregular Cycladic lanes rather than a grid.
     const occupied=[
-      {id:"meme-factory",label:"Meme Factory House",x:-2,z:28,w:10,d:7,h:6.5,occupied:true,interior:"meme-factory",labelScale:0.34},
-      {id:"dsb-studio",label:"DSB Studio Stage",x:18,z:27,w:10,d:7,h:7,occupied:true,interior:"dsb-studio",labelScale:0.37},
-      {id:"maxis",label:"Maxis Club Theater",x:34,z:17,w:10,d:7,h:6.5,occupied:true,labelScale:0.34},
-      {id:"without-rulers",label:"Without Rulers Shop",x:30,z:38,w:10,d:7,h:6,occupied:true,labelScale:0.32},
-      {id:"big-bitcoin",label:"Big Bitcoin",x:8,z:47,w:11,d:8,h:7,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
-      {id:"stackchain",label:"Stackchain Magazine",x:-13,z:44,w:10,d:7,h:6,occupied:true,labelScale:0.32},
-      {id:"proof-ink",label:"Proof Of Ink",x:-22,z:31,w:9,d:7,h:6,occupied:true,labelScale:0.42}
+      // Inland properties face their local lanes rather than the sea.
+      {id:"meme-factory",label:"Meme Factory House",x:16,z:34,w:10,d:7,h:6.5,r:Math.PI/2,occupied:true,interior:"meme-factory",labelScale:0.34},
+      {id:"dsb-studio",label:"DSB Studio Stage",x:37,z:33,w:10,d:7,h:7,r:-Math.PI/2,occupied:true,interior:"dsb-studio",labelScale:0.37},
+      {id:"maxis",label:"Maxis Club Theater",x:53,z:22,w:10,d:7,h:6.5,r:Math.PI,occupied:true,labelScale:0.34},
+      {id:"without-rulers",label:"Without Rulers Shop",x:49,z:47,w:10,d:7,h:6,r:Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"big-bitcoin",label:"Big Bitcoin",x:27,z:56,w:11,d:8,h:7,r:Math.PI,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
+      {id:"stackchain",label:"Stackchain Magazine",x:6,z:52,w:10,d:7,h:6,r:-Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"proof-ink",label:"Proof Of Ink",x:-2,z:39,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
     ];
     for(const spec of occupied) houses.push(buildHouse(root,spec));
     const vacant=[
-      [-31,21,8,6,5.5],[-16,17,8,6,6],[1,15,8,7,6],[19,13,9,7,6],[42,31,8,6,6],
-      [-31,46,8,7,6],[-12,57,9,7,6],[8,62,8,6,6],[28,57,9,7,6],[45,49,8,6,6],
-      [-3,6,8,6,5.5],[15,4,8,6,6],[34,3,8,6,6],[-29,8,8,6,6]
+      [0,23,8,6,5.5,Math.PI/2],[14,21,8,6,6,0],[29,18,8,7,6,Math.PI],[45,15,9,7,6,Math.PI],
+      [61,36,8,6,6,-Math.PI/2],[-1,57,8,7,6,Math.PI/2],[17,68,9,7,6,Math.PI],[36,72,8,6,6,Math.PI],
+      [56,66,9,7,6,Math.PI],[69,55,8,6,6,-Math.PI/2],[15,8,8,6,5.5,0],[32,5,8,6,6,0],
+      [50,4,8,6,6,Math.PI],[1,10,8,6,6,Math.PI/2],[67,18,8,6,6,-Math.PI/2],[72,45,8,6,6,-Math.PI/2]
     ];
-    vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],labelScale:0.42})));
+    vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
+
+    // The Olympus descent ends in open foothill nature, not inside town.
+    block(root,"#8f8a66",24,0.12,38,24,0.24,16);
+    for(const [x,z] of [[15,35],[19,42],[29,34],[34,41]]){
+      block(root,"#5e4b34",x,1,z,0.45,2,0.45);
+      block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
+    }
+    block(root,"#8d6d43",28,1.7,39,0.45,3.4,0.45);
+    block(root,"#8d6d43",31.2,2.4,39,6.5,0.35,0.7);
+    sign(root,"CHORA",31.1,2.72,39.4,0.62,"#f3e3a0");
 
     // White stone lanes and small squares connect clusters but leave deliberate maze-like gaps.
-    for(const [x,z,w,d,r] of [[2,36,64,4,0],[16,22,4,42,0],[-12,43,4,40,0],[27,50,38,4,0],[2,11,54,4,0]]){
+    for(const [x,z,w,d,r] of [[25,40,78,4,0],[28,26,4,50,0],[6,48,4,46,0],[44,58,50,4,0],[28,14,72,4,0],[57,34,4,42,0]]){
       const lane=block(root,"#d7d1c6",x,0.08,z,w,0.16,d); lane.rotation.y=r;
     }
-    for(const [x,z] of [[3,34],[22,43],[-15,26]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
+    for(const [x,z] of [[20,39],[42,49],[7,30],[55,24]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
+
+    // Shore road: continuous promenade from harbor to the far-right edge of Chora.
+    for(let i=0;i<34;i++){
+      const t=i/33;
+      const x=18+(72-18)*t;
+      const z=90+(72-90)*t + Math.sin(t*Math.PI)*2.5;
+      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.2,0.18,5.4);
+      road.rotation.y=Math.atan2(72-90,72-18);
+    }
 
     // BIG BITCOIN's phrase belongs to its immediate side alley.
-    block(root,"#f1eee7",14,2.0,48.9,12,4,0.3);
-    sign(root,"Compliance Is Defiance",14,2.55,49.1,0.38,"#b51f2d");
+    block(root,"#f1eee7",33,2.0,61.2,13,4,0.3);
+    sign(root,"Compliance Is Defiance",33,2.55,61.4,0.38,"#b51f2d");
 
     // Waterfront taverna / beach-bar and Noderunner TV gathering spot.
-    const tv=createNode({ position:{x:30,y:0,z:77}, rotation:{x:0,y:Math.PI,z:0} }); addChild(root,tv);
+    const tv=createNode({ position:{x:58,y:0,z:78}, rotation:{x:0,y:Math.PI,z:0} }); addChild(root,tv);
     block(tv,"#f3efe7",0,2.4,0,14,4.8,8);
     block(tv,"#2b6599",0,4.9,0,14.5,0.45,8.5);
     sign(tv,"Noderunner Taverna",0,4.0,4.1,0.5,"#4fb7d5");
     block(tv,"#78543b",0,2.6,4.15,6.5,3.8,0.45);
     const tvScreen=createNode({ position:{x:0,y:2.7,z:4.42} }); addChild(tv,tvScreen);
-    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",30+x,0.45,84,1.6,0.8,1.6); block(root,"#386ea0",30+x,1.25,84,0.12,1.7,0.12); }
+    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",58+x,0.45,84,1.6,0.8,1.6); block(root,"#386ea0",58+x,1.25,84,0.12,1.7,0.12); }
 
     // Meme Factory House doubles as the existing shop interaction until interiors land.
     const meme=houses.find(h=>h.id==="meme-factory");
