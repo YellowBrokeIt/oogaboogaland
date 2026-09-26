@@ -4,65 +4,118 @@
   const BL = window.BL = window.BL || {};
   // All outdoor sources are started once; updates only automate this fixed graph.
   const createAmbience = (context, master) => {
-    const sources = [], nodes = [], layers = {}, names = ["river", "waterfall", "motor", "crowd", "wildlife"], targets = new Float32Array(5);
-    let nextCall = 0, calls = 0, birdSide = 0, enabled = false;
-    const bus = context.createGain(); bus.gain.value = 0; bus.connect(master); nodes.push(bus);
-    const noiseBuffer = context.createBuffer(1, context.sampleRate * 3, context.sampleRate), samples = noiseBuffer.getChannelData(0);
-    let seed = 71931;
-    for (let i = 0; i < samples.length; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) | 0; samples[i] = (seed >>> 0) / 2147483648 - 1; }
-    const noise = context.createBufferSource(); noise.buffer = noiseBuffer; noise.loop = true; noise.start(); sources.push(noise);
-    for (const name of names) {
-      const gain = context.createGain(), pan = context.createStereoPanner(); gain.gain.value = 0; gain.connect(pan); pan.connect(bus);
-      layers[name] = { gain, pan }; nodes.push(gain, pan);
+    // Region-aware outdoor soundscape. Noderunner radio remains a separate proximity source.
+    const sources=[], nodes=[], layers={}, names=["wind","surf","waterfall","cicadas","town","motor","wildlife"], targets=new Float32Array(7);
+    let nextCall=0,calls=0,birdSide=0,enabled=false;
+    const bus=context.createGain(); bus.gain.value=0; bus.connect(master); nodes.push(bus);
+
+    const noiseBuffer=context.createBuffer(1,context.sampleRate*3,context.sampleRate), samples=noiseBuffer.getChannelData(0);
+    let seed=71931;
+    for(let i=0;i<samples.length;i++){ seed=(Math.imul(seed,1664525)+1013904223)|0; samples[i]=(seed>>>0)/2147483648-1; }
+    const noise=context.createBufferSource(); noise.buffer=noiseBuffer; noise.loop=true; noise.start(); sources.push(noise);
+
+    for(const name of names){
+      const gain=context.createGain(), pan=context.createStereoPanner(); gain.gain.value=0; gain.connect(pan); pan.connect(bus);
+      layers[name]={gain,pan}; nodes.push(gain,pan);
     }
-    const filter = (name, frequency, q) => {
-      const f = context.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = frequency; f.Q.value = q;
+    const filter=(name,type,frequency,q)=>{
+      const f=context.createBiquadFilter(); f.type=type; f.frequency.value=frequency; f.Q.value=q;
       noise.connect(f); f.connect(layers[name].gain); nodes.push(f); return f;
     };
-    filter("river", 850, 0.45); filter("waterfall", 240, 0.35);
-    const murmur = filter("crowd", 620, 1.3);
-    const motorFilter = context.createBiquadFilter(); motorFilter.type = "lowpass"; motorFilter.frequency.value = 220; motorFilter.connect(layers.motor.gain); nodes.push(motorFilter);
-    const motor = context.createOscillator(); motor.type = "sawtooth"; motor.frequency.value = 58; motor.connect(motorFilter); motor.start(); sources.push(motor);
-    const birds = [];
-    for (let i = 0; i < 2; i++) {
-      const oscillator = context.createOscillator(), gain = context.createGain(); gain.gain.value = 0; oscillator.connect(gain); gain.connect(layers.wildlife.gain); oscillator.start();
-      birds.push({ oscillator, gain }); sources.push(oscillator); nodes.push(gain);
+    const windFilter=filter("wind","bandpass",520,0.35);
+    const surfFilter=filter("surf","bandpass",960,0.45);
+    const waterfallFilter=filter("waterfall","bandpass",280,0.4);
+    const cicadaFilter=filter("cicadas","bandpass",4100,2.2);
+    const townFilter=filter("town","bandpass",680,1.2);
+
+    const motorFilter=context.createBiquadFilter(); motorFilter.type="lowpass"; motorFilter.frequency.value=220; motorFilter.connect(layers.motor.gain); nodes.push(motorFilter);
+    const motor=context.createOscillator(); motor.type="sawtooth"; motor.frequency.value=58; motor.connect(motorFilter); motor.start(); sources.push(motor);
+
+    const birds=[];
+    for(let i=0;i<2;i++){
+      const oscillator=context.createOscillator(), gain=context.createGain(); gain.gain.value=0; oscillator.connect(gain); gain.connect(layers.wildlife.gain); oscillator.start();
+      birds.push({oscillator,gain}); sources.push(oscillator); nodes.push(gain);
     }
-    const attenuate = (distance, range) => 1 / (1 + (distance / range) ** 2);
-    const position = (layer, x, y, z, camera, level, range, index) => {
-      const dx = x - camera.position.x, dy = y - camera.position.y, dz = z - camera.position.z;
-      const fx = camera.target.x - camera.position.x, fz = camera.target.z - camera.position.z;
-      const distance = Math.hypot(dx, dy, dz), horizontal = Math.hypot(dx, dz), forward = Math.hypot(fx, fz);
-      const pan = horizontal > 0.01 && forward > 0.01 ? (-fz * dx + fx * dz) / (horizontal * forward) : 0;
-      targets[index] = level * attenuate(distance, range);
-      layer.gain.gain.setTargetAtTime(targets[index], context.currentTime, 0.25);
-      layer.pan.pan.setTargetAtTime(Math.max(-0.85, Math.min(0.85, pan)), context.currentTime, 0.2);
+
+    const attenuate=(distance,range)=>1/(1+(distance/range)**2);
+    const panFor=(camera,x,z)=>{
+      const dx=x-camera.position.x,dz=z-camera.position.z,fx=camera.target.x-camera.position.x,fz=camera.target.z-camera.position.z;
+      const horizontal=Math.hypot(dx,dz),forward=Math.hypot(fx,fz);
+      return horizontal>0.01&&forward>0.01?Math.max(-0.85,Math.min(0.85,(-fz*dx+fx*dz)/(horizontal*forward))):0;
     };
-    const update = (camera, boat, active, muted) => {
-      const at = context.currentTime;
-      enabled = active && !muted;
-      bus.gain.setTargetAtTime(enabled ? 1 : 0, at, 0.3);
-      if (!enabled) { nextCall = at + 2; return; }
-      const radius = Math.hypot(camera.position.x, camera.position.z), ux = radius > 0.01 ? camera.position.x / radius : 0, uz = radius > 0.01 ? camera.position.z / radius : 1;
-      position(layers.river, ux * 39, -0.5, uz * 39, camera, 0.065 * (0.93 + Math.sin(at * 0.6) * 0.07), 15, 0);
-      position(layers.waterfall, ux * 44, -5, uz * 44, camera, 0.09, 17, 1);
-      position(layers.motor, boat.x, boat.y, boat.z, camera, 0.023 * (0.9 + Math.sin(at * 16) * 0.1), 13, 2);
-      motor.frequency.setTargetAtTime(58 + Math.sin(at * 0.8) * 3, at, 0.1);
-      position(layers.crowd, -18, 1, -9, camera, 0.026 * (0.55 + 0.2 * Math.sin(at * 2.7) + 0.15 * Math.sin(at * 4.1)), 11, 3);
-      murmur.frequency.setTargetAtTime(650 + Math.sin(at * 1.9) * 180, at, 0.12);
-      if (at >= nextCall) {
-        birdSide = calls % 2;
-        const bird = birds[birdSide], base = birdSide ? 1850 : 1350;
-        nextCall = at + 6 + (calls % 3) * 1.7; calls++;
-        bird.oscillator.frequency.cancelScheduledValues(at); bird.oscillator.frequency.setValueAtTime(base, at);
-        bird.oscillator.frequency.exponentialRampToValueAtTime(base * 1.45, at + 0.09); bird.oscillator.frequency.exponentialRampToValueAtTime(base * 0.9, at + 0.28);
-        bird.gain.gain.cancelScheduledValues(at); bird.gain.gain.setValueAtTime(0, at); bird.gain.gain.linearRampToValueAtTime(0.65, at + 0.02);
-        bird.gain.gain.linearRampToValueAtTime(0, at + 0.12); bird.gain.gain.linearRampToValueAtTime(0.5, at + 0.17); bird.gain.gain.linearRampToValueAtTime(0, at + 0.3);
+    const position=(layer,x,y,z,camera,level,range,index)=>{
+      const distance=Math.hypot(x-camera.position.x,y-camera.position.y,z-camera.position.z);
+      targets[index]=level*attenuate(distance,range);
+      layer.gain.gain.setTargetAtTime(targets[index],context.currentTime,0.3);
+      layer.pan.pan.setTargetAtTime(panFor(camera,x,z),context.currentTime,0.25);
+    };
+    const setWorld=(layer,level,index)=>{
+      targets[index]=level;
+      layer.gain.gain.setTargetAtTime(level,context.currentTime,0.35);
+      layer.pan.pan.setTargetAtTime(0,context.currentTime,0.35);
+    };
+
+    const update=(camera,boat,active,muted)=>{
+      const at=context.currentTime, p=camera.position;
+      enabled=active&&!muted; bus.gain.setTargetAtTime(enabled?1:0,at,0.25);
+      if(!enabled){ nextCall=at+2; return; }
+
+      const olympus=Math.hypot(p.x+52,p.z+42);
+      const chora=Math.hypot(p.x-32,p.z-60);
+      const coastRadius=Math.hypot(p.x,p.z);
+      const nearCoast=Math.max(0,Math.min(1,(coastRadius-78)/42));
+      const foothill=Math.max(0,1-Math.hypot(p.x-5,p.z-18)/58);
+
+      // Wind dominates high/exposed Olympus and fades toward town.
+      const windLevel=0.018+0.055*Math.max(0,1-olympus/55);
+      setWorld(layers.wind,windLevel,0);
+      windFilter.frequency.setTargetAtTime(420+Math.max(0,1-olympus/60)*420,at,0.4);
+
+      // Surf follows the actual coast rather than a generic circular river.
+      const surfLevel=(0.012+0.06*nearCoast)*(0.92+Math.sin(at*0.7)*0.08);
+      setWorld(layers.surf,surfLevel,1);
+      surfFilter.frequency.setTargetAtTime(820+nearCoast*420,at,0.35);
+
+      // Two authored Olympus waterfalls / runoff.
+      position(layers.waterfall,-66,30,-20,camera,0.08,24,2);
+      const d2=Math.hypot(p.x+43,p.y-24,p.z-1);
+      const second=0.065*attenuate(d2,20);
+      layers.waterfall.gain.gain.setTargetAtTime(Math.max(targets[2],second),at,0.25);
+
+      // Cicadas strongest in warm foothills / olive country, weak at exposed summit and seafront.
+      const cicadaLevel=0.034*foothill*(1-Math.max(0,1-olympus/42)*0.8)*(1-nearCoast*0.55);
+      setWorld(layers.cicadas,cicadaLevel*(0.85+0.15*Math.sin(at*5.2)),3);
+      cicadaFilter.frequency.setTargetAtTime(3900+Math.sin(at*1.8)*260,at,0.2);
+
+      // Chora / Agora social murmur.
+      const townLevel=0.035*attenuate(chora,35);
+      position(layers.town,34,1,60,camera,townLevel?0.055:0,38,4);
+      townFilter.frequency.setTargetAtTime(650+Math.sin(at*1.7)*160,at,0.18);
+
+      // Harbor/boat mechanical hum remains local.
+      position(layers.motor,boat.x,boat.y,boat.z,camera,0.026*(0.9+Math.sin(at*14)*0.1),18,5);
+      motor.frequency.setTargetAtTime(55+Math.sin(at*0.9)*4,at,0.12);
+
+      // Birds / gulls bias toward coast, occasional mountain birds remain audible.
+      if(at>=nextCall){
+        birdSide=calls%2; const bird=birds[birdSide], base=nearCoast>0.4?(birdSide?1550:1150):(birdSide?2050:1650);
+        nextCall=at+5.5+(calls%4)*1.3; calls++;
+        bird.oscillator.frequency.cancelScheduledValues(at); bird.oscillator.frequency.setValueAtTime(base,at);
+        bird.oscillator.frequency.exponentialRampToValueAtTime(base*1.42,at+0.08); bird.oscillator.frequency.exponentialRampToValueAtTime(base*0.92,at+0.3);
+        bird.gain.gain.cancelScheduledValues(at); bird.gain.gain.setValueAtTime(0,at); bird.gain.gain.linearRampToValueAtTime(0.6,at+0.025);
+        bird.gain.gain.linearRampToValueAtTime(0,at+0.13); bird.gain.gain.linearRampToValueAtTime(0.42,at+0.19); bird.gain.gain.linearRampToValueAtTime(0,at+0.32);
       }
-      position(layers.wildlife, birdSide ? 25 : -27, 3, birdSide ? -21 : 3, camera, 0.016, 28, 4);
+      const birdLevel=0.012+nearCoast*0.014;
+      setWorld(layers.wildlife,birdLevel,6);
     };
-    return { update, get stats() { return { enabled, calls, sources: sources.length, nodes: nodes.length, river: targets[0], waterfall: targets[1], motor: targets[2], crowd: targets[3], wildlife: targets[4], gain: bus.gain.value, motorPan: layers.motor.pan.pan.value }; }, dispose: () => { for (const source of sources) { source.stop(); source.disconnect(); } for (const node of nodes) node.disconnect(); } };
+
+    return {
+      update,
+      get stats(){ return {enabled,calls,sources:sources.length,nodes:nodes.length,wind:targets[0],surf:targets[1],waterfall:targets[2],cicadas:targets[3],town:targets[4],motor:targets[5],wildlife:targets[6],gain:bus.gain.value}; },
+      dispose:()=>{ for(const source of sources){ try{source.stop();}catch{} source.disconnect(); } for(const node of nodes) node.disconnect(); }
+    };
   };
+
   const createInteriorAmbience = (context, master) => {
     const bus=context.createGain(); bus.gain.value=0; bus.connect(master);
     const humGain=context.createGain(); humGain.gain.value=0; humGain.connect(bus);
