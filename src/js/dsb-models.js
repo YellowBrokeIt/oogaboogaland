@@ -158,6 +158,37 @@
     }
     return { id:spec.id,label:spec.label||"VACANT",root,door,sign:label,occupied:!!spec.occupied,interior:spec.interior||null };
   };
+  const addNatureBatch = (parent, parts) => {
+    if (!parts.length) return null;
+    const node=createNode({ geometry:merge(...parts) }); addChild(parent,node); return node;
+  };
+  const natureBox = (parts, color, x,y,z,w,h,d, emissive=0) =>
+    parts.push(box({ w,h,d,color,emissive,offset:{x,y,z} }));
+  const addRockCluster = (parts,x,y,z,scale=1) => {
+    natureBox(parts,"#6e6861",x,y+0.45*scale,z,1.8*scale,0.9*scale,1.4*scale);
+    natureBox(parts,"#817970",x+0.8*scale,y+0.7*scale,z-0.35*scale,1.2*scale,1.1*scale,0.9*scale);
+    natureBox(parts,"#5e5a56",x-0.65*scale,y+0.3*scale,z+0.55*scale,1.0*scale,0.6*scale,1.1*scale);
+  };
+  const addCypress = (parts,x,y,z,scale=1) => {
+    natureBox(parts,"#5b4630",x,y+1.0*scale,z,0.38*scale,2.0*scale,0.38*scale);
+    natureBox(parts,"#315e3f",x,y+3.0*scale,z,1.35*scale,3.8*scale,1.35*scale);
+    natureBox(parts,"#3c7248",x,y+5.0*scale,z,0.9*scale,1.7*scale,0.9*scale);
+  };
+  const addOlive = (parts,x,y,z,scale=1) => {
+    natureBox(parts,"#66503b",x,y+1.1*scale,z,0.5*scale,2.2*scale,0.5*scale);
+    natureBox(parts,"#687c4b",x,y+2.8*scale,z,3.2*scale,1.9*scale,2.7*scale);
+    natureBox(parts,"#81935b",x+0.8*scale,y+3.1*scale,z-0.4*scale,1.8*scale,1.2*scale,1.7*scale);
+  };
+  const addShrub = (parts,x,y,z,scale=1,flower=false) => {
+    natureBox(parts,"#647948",x,y+0.45*scale,z,1.5*scale,0.9*scale,1.35*scale);
+    natureBox(parts,"#7f9257",x+0.35*scale,y+0.75*scale,z-0.15*scale,0.9*scale,0.75*scale,0.9*scale);
+    if(flower) natureBox(parts,"#d7a02e",x-0.2*scale,y+1.0*scale,z+0.1*scale,0.28*scale,0.28*scale,0.28*scale);
+  };
+  const addGrassPatch = (parts,x,y,z,scale=1) => {
+    for(const [dx,dz,h,c] of [[0,0,0.65,"#9c9b59"],[0.35,0.15,0.5,"#b1a660"],[-0.3,0.25,0.55,"#838d4f"],[0.15,-0.3,0.45,"#a58e49"]])
+      natureBox(parts,c,x+dx*scale,y+h*scale/2,z+dz*scale,0.12*scale,h*scale,0.12*scale);
+  };
+
   const buildMemeFactoryInterior = () => {
     // Interiors are deliberately "bigger on the inside": a separate chunk with its own dimensions.
     const root=createNode({ visible:false });
@@ -258,6 +289,67 @@
     block(root,"#faf6ef",px,py+8.7,pz,10,1.25,1.7);
     block(root,"#d7c5a5",px,py-0.35,pz,12,0.7,6.5);
     sign(root,"PORTARA",px,py+10.6,pz+0.9,0.72,"#f5d676");
+
+    // Regional nature pass: batched low-poly detail keeps the island rich without turning every plant into a draw call.
+    const summitNature=[], upperNature=[], foothillNature=[], plainNature=[], coastNature=[];
+
+    // Summit / upper Olympus: exposed rock, sparse scrub, cypress and broken marble.
+    for(const [x,y,z,sc] of [
+      [-64,45,-47,1.2],[-58,48,-56,0.9],[-45,46,-55,1.0],[-42,40,-39,1.3],
+      [-69,36,-30,1.0],[-51,34,-20,1.2],[-34,29,-18,1.1],[-61,28,-8,1.0]
+    ]) addRockCluster(summitNature,x,y,z,sc);
+    for(const [x,y,z,sc] of [[-69,31,-17,0.9],[-49,29,-7,0.8],[-37,24,-3,0.8],[-58,23,4,0.75]])
+      addCypress(upperNature,x,y,z,sc);
+    for(const [x,y,z,sc] of [[-66,39,-39,0.8],[-56,35,-27,0.7],[-45,31,-17,0.8],[-33,25,-10,0.8],[-27,20,-2,0.9]])
+      addShrub(upperNature,x,y,z,sc,true);
+
+    // Broken ancient fragments along overlooks.
+    for(const [x,y,z] of [[-58,43,-24],[-43,33,-11],[-29,23,1],[-18,15,8]]){
+      natureBox(upperNature,"#ded6c8",x,y+0.45,z,3.8,0.9,1.2);
+      natureBox(upperNature,"#eee7dc",x-1.3,y+1.8,z,0.55,2.8,0.55);
+      natureBox(upperNature,"#cfc4b3",x+1.1,y+0.9,z+0.4,1.4,0.45,1.1);
+    }
+
+    // Lower Olympus / foothills: olives, dry grass, stone walls and tiny farm terraces.
+    for(const [x,z,sc] of [
+      [-35,12,0.95],[-28,16,1.0],[-20,20,0.9],[-11,18,1.05],[-4,14,0.95],
+      [5,17,1.0],[13,21,0.9],[20,18,1.05],[27,23,0.9],[-18,28,0.85],[2,28,0.9]
+    ]) addOlive(foothillNature,x,0,z,sc);
+    for(const [x,z] of [[-32,20],[-24,25],[-13,24],[-5,21],[8,24],[18,27],[28,16],[31,29],[-2,35],[10,34]])
+      addGrassPatch(foothillNature,x,0,z,1.35);
+    for(const [x,z,flower] of [[-29,10,1],[-22,14,0],[-8,11,1],[4,12,0],[16,13,1],[24,10,0],[30,20,1]])
+      addShrub(foothillNature,x,0,z,1.0,!!flower);
+
+    // Dry-stone field walls: deliberately leave clear gates in the walking lines.
+    for(const [x,z,w,d] of [[-20,31,20,0.5],[7,31,16,0.5],[24,27,0.5,12],[-6,17,0.5,11]])
+      natureBox(foothillNature,"#8d8171",x,0.55,z,w,1.1,d);
+    // Small cultivated plots.
+    for(const [x,z,w,d] of [[-20,35,14,6],[8,34,11,6],[23,19,9,7]]){
+      natureBox(foothillNature,"#8f764e",x,0.07,z,w,0.14,d);
+      for(let q=-w/2+1;q<w/2;q+=2.2) natureBox(foothillNature,"#6f8b48",x+q,0.35,z,0.25,0.7,d-0.8);
+    }
+
+    // Open plain between Olympus and Chora: grassland, scattered olives, rocks and a tiny roadside shrine.
+    for(const [x,z] of [[36,10],[44,8],[51,13],[32,17],[47,20],[57,21],[24,11],[61,13]])
+      addGrassPatch(plainNature,x,0,z,1.55);
+    for(const [x,z,sc] of [[52,5,0.9],[58,15,1.0],[42,19,0.85],[30,12,0.8]]) addOlive(plainNature,x,0,z,sc);
+    for(const [x,z,sc] of [[25,4,0.8],[49,-4,0.9],[59,6,0.7]]) addRockCluster(plainNature,x,0,z,sc);
+    natureBox(plainNature,"#eee8de",56,1.6,6,2.4,3.2,1.8);
+    natureBox(plainNature,"#2e6da2",56,1.45,6.95,0.8,1.5,0.12);
+    natureBox(plainNature,"#e2d5bd",56,3.35,6,3.1,0.35,2.2);
+
+    // Coastal texture: low scrub, beach grass and rock groupings away from the promenade.
+    for(const [x,z] of [[-50,94],[-42,101],[-35,88],[88,75],[96,67],[101,58],[-70,72],[-78,63]])
+      addGrassPatch(coastNature,x,0,z,1.8);
+    for(const [x,z,sc] of [[-58,102,0.8],[-46,109,0.65],[92,83,0.7],[103,70,0.8],[-82,55,0.7]])
+      addRockCluster(coastNature,x,0,z,sc);
+    for(const [x,z] of [[-68,89],[-55,83],[93,61],[84,72]]) addShrub(coastNature,x,0,z,1.05,false);
+
+    addNatureBatch(root,summitNature);
+    addNatureBatch(root,upperNature);
+    addNatureBatch(root,foothillNature);
+    addNatureBatch(root,plainNature);
+    addNatureBatch(root,coastNature);
 
     // Switchback trail is intentionally long: distinct overlooks, ruins and olive foothills.
     for(let i=0;i<TRAIL.length-1;i++){
@@ -422,6 +514,13 @@
     const station=createNode({ position:{x:V2.station.x,y:0,z:V2.station.z} }); addChild(root,station);
     block(station,"#342942",0,1,0,8,2,6); sign(station,"Bitcoin Ride",0,3.1,3.2,0.62).rotation.y=Math.PI;
     const carts=[coasterCar(),coasterCar(),coasterCar()]; carts.forEach(add=>addChild(root,add)); const cart=carts[0];
+
+    // Mountain runoff becomes a visible little stream before disappearing into the dry foothills.
+    for(let i=0;i<18;i++){
+      const t=i/17, x=-46+21*t, z=2+16*t, y=Math.max(0.18,18*(1-t)*(1-t));
+      const run=block(root,i%3?"#5cc4df":"#9ee7ef",x,y,z,1.4,0.12,1.9,0.18);
+      run.rotation.y=-0.9;
+    }
 
     // Low-cost distant foam movement and mountain water accents.
     for(const [x,y,z,h] of [[-66,30,-20,12],[-43,24,-1,10]]){
