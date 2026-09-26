@@ -9,7 +9,7 @@
   const OLYMPUS_GATE = { x: -52, y: 52, z: -48 };
   const SUMMIT_SPAWN = { x: -52, y: 50, z: -42 };
   const VIEW = { yaw: Math.PI, pitch: 0.25, dist: 6, target: { x: -52, y: 51.7, z: -38 }, position: { x: -52, y: 50, z: -42 } };
-  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 28, y: 1.7, z: 111 }, position: { x: 28, y: 0, z: 111 } };
+  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: -24, y: 1.7, z: 108 }, position: { x: -24, y: 0, z: 108 } };
   const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: -34, y: 1.7, z: -20 }, position: { x: -34, y: 0, z: -20 } };
   const FLYOVER_SECONDS = 15, GLORY_HOLD_SECONDS = 4, ARRIVAL_SECONDS = FLYOVER_SECONDS + GLORY_HOLD_SECONDS;
   const ARRIVAL_KEYS = [
@@ -149,7 +149,7 @@
     while (i < ARRIVAL_KEYS.length - 2 && t > ARRIVAL_KEYS[i + 1].t) i++;
     cameraKey(ARRIVAL_KEYS[i], ARRIVAL_KEYS[i + 1], t);
   };
-  const reveal = () => {
+  const reveal = (skipAudio = false) => {
     if (phase !== "entrance") return;
     progress = 1; buildLand();
     phase = "arrival"; arrivalTime = 0; flash = 1; dsbScene.renderOpts = RENDER;
@@ -157,7 +157,7 @@
     avatar.root.position.x = SUMMIT_SPAWN.x; avatar.root.position.y = SUMMIT_SPAWN.y + avatar.baseY; avatar.root.position.z = SUMMIT_SPAWN.z;
     avatar.root.rotation.y = 0; poseAvatar(false, 0);
     document.body.classList.remove("dsb-entry"); document.body.classList.add("dsb-arrival"); panel.dataset.phase = phase;
-    audio.arrive(); arrivalCamera();
+    if (!skipAudio) audio.arrive(); else audio.arrive(true); arrivalCamera();
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) finishArrival();
   };
   const stopRide = () => {
@@ -171,7 +171,7 @@
     if (trip.angle >= trip.start + TAU) { trip.angle = trip.start; trip.wait = WAIT; return true; }
     return false;
   };
-  const atDock = () => near(28, 111, 7);
+  const atDock = () => near(-24, 108, 7);
   const atStation = () => near(-34, -20, 5);
   const board = (kind) => {
     if (phase !== "land") return;
@@ -274,7 +274,7 @@
     if (name === "leave") returnHub();
     else if (name === "dsb-context") act();
     else if (name === "dsb-banana") buy("banana");
-    else if (name === "dsb-skip-entry" && phase === "entrance") reveal();
+    else if (name === "dsb-skip-entry" && phase === "entrance") { audio.skipTransition?.(); reveal(true); }
     else if (name === "dsb-skip") finishArrival();
     else if (name === "dsb-start-audio") audio.gesture();
     else if (name === "dsb-panel") { panel.dataset.folded = String(panel.dataset.folded !== "true"); document.getElementById("dsb-toggle").setAttribute("aria-expanded", String(panel.dataset.folded !== "true")); document.getElementById("dsb-toggle").textContent = panel.dataset.folded === "true" ? "Show DSB menu" : "Hide DSB menu"; }
@@ -367,7 +367,7 @@
     // V2 scale pass keeps the future catamarans moored; free-sail controls come next.
     for (let i = 0; i < land.boats.length; i++) {
       const b = land.boats[i];
-      b.position.x = 22 + i * 6; b.position.z = 122; b.position.y = -0.15 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = Math.PI;
+      b.position.x = -30 + i * 6; b.position.z = 120; b.position.y = -0.15 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = Math.PI;
     }
     if (phase === "boat") rideCamera(land.boats[0].position, Math.PI, 0);
     const arrived = advanceTrip(trainTrip, dt); rideAngle = trainTrip.angle;
