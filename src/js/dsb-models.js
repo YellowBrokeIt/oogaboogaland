@@ -106,13 +106,56 @@
   const buildHouse = (parent, spec) => {
     const root=createNode({ position:{x:spec.x,y:spec.y||0,z:spec.z}, rotation:{x:0,y:spec.r||0,z:0} }); addChild(parent,root);
     const w=spec.w||7,d=spec.d||6,h=spec.h||5;
-    block(root,spec.wall||"#f4f1e9",0,h/2,0,w,h,d);
+    const seed=[...String(spec.id||"house")].reduce((a,c)=>a+c.charCodeAt(0),0);
+    const accent=spec.door||["#2865a3","#3176b6","#2776a0","#2d8291"][seed%4];
+    const wall=spec.wall||["#f4f1e9","#fbf7ef","#eee9df"][seed%3];
+
+    // Cycladic massing: a main white volume plus occasional offset upper room / roof terrace.
+    block(root,wall,0,h/2,0,w,h,d);
     block(root,"#e3ddd2",0,h+0.2,0,w+0.35,0.35,d+0.35);
-    const door=block(root,spec.door||"#2865a3",0,1.35,d/2+0.04,1.35,2.7,0.14);
-    for(const sx of [-1,1]) block(root,spec.trim||"#2f6dad",sx*(w*0.28),h*0.58,d/2+0.05,1.15,1.25,0.14);
+    if(seed%3!==0){
+      const uw=w*(seed%2?0.56:0.66), ud=d*0.58, ux=(seed%2?1:-1)*w*0.16;
+      block(root,wall,ux,h+1.5,-d*0.12,uw,2.7,ud);
+      block(root,"#e8e1d6",ux,h+2.95,-d*0.12,uw+0.25,0.28,ud+0.25);
+      block(root,accent,ux,h+1.55,ud*0.29-d*0.12,0.9,1.0,0.12);
+    }
+
+    // Door and shutters always live on local +Z, so the authored house rotation determines which road/beach they face.
+    const door=block(root,accent,0,1.35,d/2+0.04,1.35,2.7,0.14);
+    for(const sx of [-1,1]){
+      block(root,accent,sx*(w*0.28),h*0.58,d/2+0.05,1.15,1.25,0.14);
+      block(root,"#f7f2e9",sx*(w*0.28),h*0.58,d/2+0.13,0.12,1.35,0.08);
+    }
+
+    // Small balcony / landing on some homes, with chunky blue railings.
+    if(seed%4!==1){
+      block(root,"#d8d0c3",0,h*0.62,d/2+0.58,Math.min(w*0.62,5.2),0.28,1.1);
+      for(const x of [-1.8,-0.9,0,0.9,1.8]) if(Math.abs(x)<w*0.34) block(root,accent,x,h*0.62+0.62,d/2+1.02,0.09,1.25,0.09);
+      block(root,accent,0,h*0.62+1.22,d/2+1.02,Math.min(w*0.62,5.2),0.09,0.09);
+    }
+
+    // Exterior stairs are a defining Cycladic feature; alternate side to keep alleys irregular.
+    if(seed%2===0){
+      const side=seed%4===0?-1:1;
+      for(let i=0;i<6;i++) block(root,"#e7e0d5",side*(w/2+0.58),0.22+i*0.42,-d*0.22+i*0.52,1.15,0.42,1.0);
+      block(root,accent,side*(w/2+1.15),1.55,0.48,0.09,3.0,3.4);
+    }
+
     const labelColor=spec.labelColor||C.yellow, plaqueColor=spec.plaqueColor||"#315f8e";
     block(root,plaqueColor,0,h-0.85,d/2+0.11,Math.max(3.3,Math.min(w-0.6,(spec.label||"VACANT").length*0.33)),0.65,0.16);
     const label=sign(root,spec.label||"VACANT",0,h-1.02,d/2+0.22,spec.labelScale||0.42,labelColor);
+
+    // Pots and bougainvillea keep the streets from reading as anonymous white boxes.
+    for(const px of [-w*0.34,w*0.34]){
+      block(root,"#b8754b",px,0.28,d/2+0.55,0.5,0.55,0.5);
+      block(root,"#568744",px,0.82,d/2+0.55,0.7,0.75,0.65);
+    }
+    if(seed%3===1){
+      const bx=(seed%2?1:-1)*(w/2-0.6);
+      block(root,"#70513a",bx,2.2,d/2+0.12,0.22,4.2,0.22);
+      for(const [dx,dy] of [[0,0],[0.5,0.5],[-0.4,1.0],[0.3,1.5],[-0.2,2.0]])
+        block(root,(seed%2?"#c8438f":"#d84d72"),bx+dx,1.3+dy,d/2+0.28,0.8,0.8,0.5);
+    }
     return { id:spec.id,label:spec.label||"VACANT",root,door,sign:label,occupied:!!spec.occupied,interior:spec.interior||null };
   };
   const build = () => {
@@ -178,6 +221,20 @@
       {id:"proof-ink",label:"Proof Of Ink",x:0,z:53,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
     ];
     for(const spec of occupied) houses.push(buildHouse(root,spec));
+    // Named properties get recognizable silhouettes/accents without changing the shared addressable-house system.
+    const named = Object.fromEntries(houses.filter(h=>h.occupied).map(h=>[h.id,h]));
+    if(named["big-bitcoin"]){
+      block(named["big-bitcoin"].root,"#c42026",0,6.55,4.15,8.5,0.65,0.28);
+      sign(named["big-bitcoin"].root,"BIG BITCOIN",0,6.32,4.34,0.58,"#ffffff");
+    }
+    if(named["proof-ink"]){
+      block(named["proof-ink"].root,"#20252d",0,0.55,4.0,4.2,1.1,0.4);
+      block(named["proof-ink"].root,"#8d5a32",0,1.45,4.05,2.8,0.16,0.8);
+    }
+    if(named["stackchain"]){
+      for(let i=0;i<4;i++) block(named["stackchain"].root,i%2?"#f0d9a2":"#c9e2ea",-2.6+i*1.7,1.0,3.9,1.2,1.45,0.18);
+    }
+
     const vacant=[
       // Inland homes: doors face the internal street network.
       [3,37,8,6,5.5,Math.PI/2],[17,35,8,6,6,0],[32,32,8,7,6,Math.PI],[48,29,9,7,6,Math.PI],
@@ -199,12 +256,44 @@
     block(root,"#8d6d43",43,2.4,-2,8,0.35,0.7);
     sign(root,"CHORA",43,2.72,-1.6,0.62,"#f3e3a0");
 
-    // White stone lanes: inland houses face these, while the beach row faces the sea.
-    for(const [x,z,w,d,r] of [[28,54,82,4,0],[30,42,4,52,0],[8,62,4,46,0],[47,72,56,4,0],[30,28,76,4,0],[60,48,4,46,0],[16,79,46,4,0]]){
-      const lane=block(root,"#d7d1c6",x,0.08,z,w,0.16,d); lane.rotation.y=r;
+    // Chora lanes: dark island-stone paving with pale joints, tighter and more irregular than the open island roads.
+    const townLanes=[[28,54,82,4],[30,42,4,52],[8,62,4,46],[47,72,56,4],[30,28,76,4],[60,48,4,46],[16,79,46,4]];
+    for(const [x,z,w,d] of townLanes){
+      block(root,"#565453",x,0.075,z,w,0.15,d);
+      const along=w>d;
+      const span=along?w:d;
+      for(let q=-span/2+2;q<span/2;q+=4.2){
+        block(root,"#e7e2d8",x+(along?q:0),0.16,z+(along?0:q),along?0.16:w,0.035,along?d:0.16);
+      }
     }
-    for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
+    // Small courtyards / piazzette break the maze and give sight-lines back to the sea.
+    for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]){
+      block(root,"#686561",x,0.09,z,13,0.18,11);
+      for(const q of [-4,0,4]) block(root,"#e9e3d8",x+q,0.19,z,0.14,0.04,11);
+    }
 
+    // Agora: an open civic/commercial square within Chora, with reused marble and a little fountain.
+    block(root,"#625f5b",39,0.11,58,22,0.22,18);
+    for(const x of [30,34,38,42,46,48]) block(root,"#e8e1d4",x,0.24,58,0.14,0.05,18);
+    block(root,"#d9cfbe",39,0.55,58,7.5,1.1,7.5);
+    block(root,"#49a8c8",39,1.12,58,5.5,0.12,5.5,0.25);
+    block(root,"#eee7dc",39,2.0,58,0.7,2.6,0.7);
+    for(const x of [31,47]) {
+      block(root,"#ece5da",x,1.8,66,0.65,3.6,0.65);
+      block(root,"#ddd2c1",x,3.7,66,1.6,0.28,1.6);
+    }
+    sign(root,"AGORA",39,3.05,50.5,0.55,"#f2d88d");
+
+    // Street life: cypress/olive shapes, pots, benches and splashes of bougainvillea.
+    for(const [x,z,t] of [[13,47,0],[24,42,1],[34,50,0],[49,54,1],[61,61,0],[17,70,1],[41,75,0],[67,76,1]]){
+      block(root,t?"#64472f":"#5c4932",x,1.15,z,0.45,2.3,0.45);
+      block(root,t?"#54763c":"#426b45",x,3.05,z,t?2.8:1.8,t?2.2:3.6,t?2.4:1.8);
+      if(t) block(root,"#708d48",x+0.8,3.1,z-0.3,1.6,1.4,1.5);
+    }
+    for(const [x,z] of [[5,58],[18,61],[32,68],[55,43],[64,67],[74,52]]){
+      block(root,"#b8754b",x,0.32,z,0.65,0.64,0.65);
+      block(root,"#c7438f",x,1.05,z,1.2,1.1,1.0);
+    }
     // Seafront road: harbor/Noderunner are isolated at the left, road then meets Chora's beach-facing row.
     const shoreRoad=[
       [-24,96],[-14,96],[-4,96],[6,95],[18,94],[30,93],[44,92],[58,90],[72,87],[86,84]
@@ -224,12 +313,24 @@
 
     // Waterfront taverna / beach-bar and Noderunner TV gathering spot.
     const tv=createNode({ position:{x:-11,y:0,z:96}, rotation:{x:0,y:0,z:0} }); addChild(root,tv);
-    block(tv,"#f3efe7",0,2.4,0,14,4.8,8);
+    block(tv,"#f7f3eb",0,2.4,0,14,4.8,8);
     block(tv,"#2b6599",0,4.9,0,14.5,0.45,8.5);
     sign(tv,"Noderunner Taverna",0,4.0,4.1,0.5,"#4fb7d5");
     block(tv,"#78543b",0,2.6,4.15,6.5,3.8,0.45);
     const tvScreen=createNode({ position:{x:0,y:2.7,z:4.42} }); addChild(tv,tvScreen);
-    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",-11+x,0.45,104,1.6,0.8,1.6); block(root,"#386ea0",-11+x,1.25,104,0.12,1.7,0.12); }
+    // Blue pergola facing the water.
+    for(const x of [-6,-2,2,6]) block(root,"#2f6fa5",-11+x,2.1,104,0.18,4.2,0.18);
+    for(let z=100;z<=108;z+=1.6) block(root,"#7e5c3c",-11,4.15,z,14,0.16,0.16);
+    for(const x of [-5,-2.5,2.5,5]) {
+      block(root,"#e7ddc8",-11+x,0.45,104,1.6,0.8,1.6);
+      block(root,"#386ea0",-11+x,1.25,104,0.12,1.7,0.12);
+      block(root,"#386ea0",-11+x+0.65,0.65,104.8,0.9,0.12,0.9);
+    }
+    // Vine/bougainvillea canopy at one end of the pergola.
+    for(const [x,y,z] of [[-17,3.8,101],[-16,4.2,102],[-15,4.35,103],[-14,4.25,104],[-13,4.1,105]]){
+      block(root,"#5c7f3d",x,y,z,1.4,0.7,1.2);
+      block(root,"#cb438b",x+0.25,y+0.3,z,0.75,0.6,0.65);
+    }
 
     // Meme Factory House doubles as the existing shop interaction until interiors land.
     const meme=houses.find(h=>h.id==="meme-factory");
