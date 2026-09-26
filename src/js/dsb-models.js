@@ -74,9 +74,10 @@
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    [-52,-42,50],[-61,-36,48],[-67,-27,45],[-63,-17,42],[-55,-10,39],
-    [-44,-8,36],[-35,-12,33],[-29,-5,30],[-34,4,27],[-29,12,23],
-    [-20,18,19],[-10,21,15],[-2,24,11],[6,27,7],[14,29,4],[19,31,2]
+    // Descend by wrapping around Olympus, then finish on the open plain to its right.
+    [-52,-42,50],[-62,-38,48],[-70,-31,46],[-74,-21,43],[-70,-11,40],
+    [-62,-3,37],[-52,1,34],[-42,0,31],[-33,-5,28],[-25,-12,25],
+    [-17,-17,21],[-9,-18,17],[-2,-16,13],[4,-13,9],[8,-10,5],[10,-8,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -174,15 +175,16 @@
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // Olympus trail exits into open nature on the right side of the mountain, well behind Chora.
-    block(root,"#8f8a66",8,0.12,29,30,0.24,18);
-    for(const [x,z] of [[-1,26],[4,34],[13,25],[18,33]]){
+    // Olympus trail exits on the broad open plain to the mountain's right.
+    // Keep a substantial walk across nature before the player reaches Chora.
+    block(root,"#8f8a66",12,0.12,-5,34,0.24,22);
+    for(const [x,z] of [[1,-12],[5,-2],[16,-11],[22,0]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    block(root,"#8d6d43",19,1.7,31,0.45,3.4,0.45);
-    block(root,"#8d6d43",22.2,2.4,31,6.5,0.35,0.7);
-    sign(root,"CHORA",22.1,2.72,31.4,0.62,"#f3e3a0");
+    block(root,"#8d6d43",14,1.7,-4,0.45,3.4,0.45);
+    block(root,"#8d6d43",18.0,2.4,-4,8.0,0.35,0.7);
+    sign(root,"CHORA",18.0,2.72,-3.6,0.62,"#f3e3a0");
 
     // White stone lanes: inland houses face these, while the beach row faces the sea.
     for(const [x,z,w,d,r] of [[28,54,82,4,0],[30,42,4,52,0],[8,62,4,46,0],[47,72,56,4,0],[30,28,76,4,0],[60,48,4,46,0],[16,79,46,4,0]]){
