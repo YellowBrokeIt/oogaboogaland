@@ -70,7 +70,7 @@
     oceanRadius: 460,
     summit: { x: -52, y: 52, z: -48 },
     chora: { x: 24, z: 20 },
-    harbor: { x: 18, z: 93 },
+    harbor: { x: 28, z: 111 },
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
@@ -192,13 +192,13 @@
     }
     for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
 
-    // Continuous seafront road from the harbor past every beach-facing house to Chora's far-right edge.
-    for(let i=0;i<44;i++){
-      const t=i/43;
-      const x=18+(86-18)*t;
-      const z=91+(84-91)*t + Math.sin(t*Math.PI)*1.5;
-      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.6,0.18,5.6);
-      road.rotation.y=Math.atan2(84-91,86-18);
+    // Continuous seafront road starts at the harbor apron, then follows the beach past Chora.
+    for(let i=0;i<48;i++){
+      const t=i/47;
+      const x=28+(86-28)*t;
+      const z=98+(84-98)*t + Math.sin(t*Math.PI)*1.6;
+      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.8,0.18,5.8);
+      road.rotation.y=Math.atan2(84-98,86-28);
     }
 
     // BIG BITCOIN's phrase belongs to its immediate side alley.
@@ -223,10 +223,12 @@
     const stage=studio.root;
     const mic=block(stage,"#b7b9c6",0,1.5,4.2,0.18,3,0.18);
 
-    // Harbor and future free-sail catamaran berth.
-    const dock=block(root,"#8b7047",V2.harbor.x,0.05,V2.harbor.z,7,0.3,25);
-    sign(root,"HARBOR",V2.harbor.x,3.4,V2.harbor.z-10,0.8,"#f2d66e");
-    const boats=[boat(),boat(),boat()]; boats.forEach((b,i)=>{ b.position.x=V2.harbor.x-6+i*6; b.position.y=-0.15; b.position.z=V2.harbor.z+8; addChild(root,b); });
+    // Harbor: a distinct shoreline destination in front of Chora, with its own apron and pier.
+    block(root,"#d2cabd",V2.harbor.x,0.1,V2.harbor.z-13,18,0.2,11);
+    const dock=block(root,"#8b7047",V2.harbor.x,0.05,V2.harbor.z,8,0.3,28);
+    for(const x of [V2.harbor.x-5,V2.harbor.x+5]) block(root,"#8b7047",x,0.03,V2.harbor.z+8,3.2,0.26,12);
+    sign(root,"HARBOR",V2.harbor.x,3.4,V2.harbor.z-16.5,0.8,"#f2d66e");
+    const boats=[boat(),boat(),boat()]; boats.forEach((b,i)=>{ b.position.x=V2.harbor.x-6+i*6; b.position.y=-0.15; b.position.z=V2.harbor.z+11; addChild(root,b); });
 
     // Compact Bitcoin ride station lives inland near Olympus, never around the perimeter.
     const station=createNode({ position:{x:V2.station.x,y:0,z:V2.station.z} }); addChild(root,station);
