@@ -207,8 +207,8 @@
     if (phase === "boat" || phase === "coaster") return "ride";
     if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
     if (insideHouse === "meme-factory") {
-      if (near(0, 5.8, 2.2)) return "house-exit";
-      if (near(0, -1.7, 3.2)) return "shop-counter";
+      if (near(0, 9.0, 2.6)) return "house-exit";
+      if (near(0, -3.9, 4.4)) return "shop-counter";
       return "";
     }
     if (nearDialer()) return "dialer";
@@ -259,11 +259,11 @@
     toast("Back in Chora.");
   };
   const openShop = () => {
-    if (insideHouse !== "meme-factory" || !near(0,-1.7,3.4)) { toast("Use the counter inside Meme Factory House."); return; }
+    if (insideHouse !== "meme-factory" || !near(0,-3.9,4.6)) { toast("Use the counter inside Meme Factory House."); return; }
     panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false; syncPlayer();
   };
   const buy = (kind) => {
-    if (phase !== "land" || insideHouse !== "meme-factory" || !near(0,-1.7,3.4)) { toast("Purchases happen at the Meme Factory counter."); return; }
+    if (phase !== "land" || insideHouse !== "meme-factory" || !near(0,-3.9,4.6)) { toast("Purchases happen at the Meme Factory counter."); return; }
     const price = kind === "bread" ? 3 : 1;
     if (tokens < price) { toast("No demo tokens left this visit."); return; }
     if ((kind === "bread" ? bread : kind === "banana" ? bananas : tomatoes) >= 9) { toast("Your bag holds nine of each item."); return; }
@@ -290,8 +290,8 @@
     if (phase === "boat" || phase === "coaster") { stopRide(); return true; }
     if (phase !== "land") return true;
     if (insideHouse === "meme-factory") {
-      if (near(0,5.8,2.2)) exitMemeFactory();
-      else if (near(0,-1.7,3.2)) openShop();
+      if (near(0,9.0,2.6)) exitMemeFactory();
+      else if (near(0,-3.9,4.4)) openShop();
       return true;
     }
     if (nearDialer()) transitGate.open();
