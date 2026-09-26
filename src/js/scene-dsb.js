@@ -9,7 +9,7 @@
   const OLYMPUS_GATE = { x: -52, y: 52, z: -48 };
   const SUMMIT_SPAWN = { x: -52, y: 50, z: -42 };
   const VIEW = { yaw: Math.PI, pitch: 0.25, dist: 6, target: { x: -52, y: 51.7, z: -38 }, position: { x: -52, y: 50, z: -42 } };
-  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 18, y: 1.7, z: 93 }, position: { x: 18, y: 0, z: 93 } };
+  const DOCK = { yaw: 0, pitch: 0, dist: 12, target: { x: 28, y: 1.7, z: 111 }, position: { x: 28, y: 0, z: 111 } };
   const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: -34, y: 1.7, z: -20 }, position: { x: -34, y: 0, z: -20 } };
   const FLYOVER_SECONDS = 15, GLORY_HOLD_SECONDS = 4, ARRIVAL_SECONDS = FLYOVER_SECONDS + GLORY_HOLD_SECONDS;
   const ARRIVAL_KEYS = [
@@ -18,8 +18,8 @@
     { t: 3.4,  p: [-47, 47, -25], q: [-36, 34, -7] },
     { t: 5.5,  p: [-24, 30, -6], q: [-8, 15, 18] },
     { t: 7.8,  p: [70, 15, 18], q: [30, 8, 52] },
-    { t: 10.0, p: [96, 10, 78], q: [46, 5, 86] },
-    { t: 12.3, p: [56, 12, 154], q: [36, 8, 72] },
+    { t: 10.0, p: [96, 10, 82], q: [46, 5, 92] },
+    { t: 12.3, p: [58, 12, 166], q: [34, 8, 86] },
     { t: 15.0, p: [22, 58, 296], q: [14, 16, 42] }
   ];
   const START = 0, WAIT = 8;
@@ -171,7 +171,7 @@
     if (trip.angle >= trip.start + TAU) { trip.angle = trip.start; trip.wait = WAIT; return true; }
     return false;
   };
-  const atDock = () => near(18, 93, 6);
+  const atDock = () => near(28, 111, 7);
   const atStation = () => near(-34, -20, 5);
   const board = (kind) => {
     if (phase !== "land") return;
@@ -366,7 +366,7 @@
     // V2 scale pass keeps the future catamarans moored; free-sail controls come next.
     for (let i = 0; i < land.boats.length; i++) {
       const b = land.boats[i];
-      b.position.x = 12 + i * 6; b.position.z = 101; b.position.y = -0.15 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = Math.PI;
+      b.position.x = 22 + i * 6; b.position.z = 122; b.position.y = -0.15 + Math.sin(time * 1.8 + i) * 0.09; b.rotation.y = Math.PI;
     }
     if (phase === "boat") rideCamera(land.boats[0].position, Math.PI, 0);
     const arrived = advanceTrip(trainTrip, dt); rideAngle = trainTrip.angle;
