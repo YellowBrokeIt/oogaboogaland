@@ -32,14 +32,16 @@
   // DSB's Ooga Portal is the Portara itself: a monumental marble doorway around the liquid horizon.
   // This frame is authored in portal-local space. A vertical portal rotates the local Z axis upright.
   const portaraFrame = (parent, radius = 2.2) => {
-    const half = radius + 1.45, height = radius * 2 + 3.0, stone = "#f3eee4", cap = "#fff9ef";
-    block(parent, stone, -half, 0, height * 0.5 - 0.35, 1.25, 1.45, height);
-    block(parent, stone,  half, 0, height * 0.5 - 0.35, 1.25, 1.45, height);
-    block(parent, cap, 0, 0, height - 0.2, half * 2 + 1.3, 1.5, 1.25);
-    block(parent, "#d8c7aa", 0, 0, -0.55, half * 2 + 2.1, 1.75, 0.7);
-    // Tiny uneven marble feet keep it feeling like an ancient surviving doorway, not a sci-fi ring mount.
-    block(parent, "#dfd2bd", -half, 0, -0.15, 1.65, 1.7, 0.55);
-    block(parent, "#dfd2bd",  half, 0, -0.15, 1.65, 1.7, 0.55);
+    // Root is rotated into a vertical portal: local Z becomes world-up.
+    const half = radius + 1.2, stone = "#f3eee4", cap = "#fff9ef";
+    const bottom = -radius - 0.15, top = radius + 1.55, pillarDepth = top - bottom;
+    const center = (bottom + top) * 0.5;
+    block(parent, stone, -half, 0, center, 1.15, 1.35, pillarDepth);
+    block(parent, stone,  half, 0, center, 1.15, 1.35, pillarDepth);
+    block(parent, cap, 0, 0, top + 0.15, half * 2 + 1.25, 1.45, 1.0);
+    block(parent, "#d8c7aa", 0, 0, bottom - 0.15, half * 2 + 2.0, 1.55, 0.45);
+    block(parent, "#dfd2bd", -half, 0, bottom + 0.2, 1.55, 1.55, 0.5);
+    block(parent, "#dfd2bd",  half, 0, bottom + 0.2, 1.55, 1.55, 0.5);
   };
   const boat = () => {
     const root = createNode();
@@ -82,14 +84,14 @@
     oceanRadius: 460,
     summit: { x: -52, y: 52, z: -48 },
     chora: { x: 24, z: 20 },
-    harbor: { x: 28, z: 111 },
+    harbor: { x: -24, z: 108 },
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    // Descend by wrapping around Olympus, then finish on the open plain to its right.
-    [-52,-42,50],[-62,-38,48],[-70,-31,46],[-74,-21,43],[-70,-11,40],
-    [-62,-3,37],[-52,1,34],[-42,0,31],[-33,-5,28],[-25,-12,25],
-    [-17,-17,21],[-9,-18,17],[-2,-16,13],[4,-13,9],[8,-10,5],[10,-8,2]
+    // Wrap around Olympus, then finish clearly on the open plain at the mountain's far-right side.
+    [-52,-42,50],[-63,-38,48],[-72,-31,46],[-76,-21,43],[-72,-11,40],
+    [-64,-2,37],[-53,3,34],[-42,3,31],[-31,-1,28],[-21,-7,24],
+    [-10,-11,20],[1,-12,16],[11,-10,12],[20,-8,8],[28,-6,4],[34,-4,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -187,16 +189,15 @@
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // Olympus trail exits on the broad open plain to the mountain's right.
-    // Keep a substantial walk across nature before the player reaches Chora.
-    block(root,"#8f8a66",12,0.12,-5,34,0.24,22);
-    for(const [x,z] of [[1,-12],[5,-2],[16,-11],[22,0]]){
+    // Trail exit clearing: separated from both Olympus and Chora, at the requested right-side plain.
+    block(root,"#8f8a66",36,0.12,-2,30,0.24,22);
+    for(const [x,z] of [[27,-10],[30,2],[41,-9],[47,2]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    block(root,"#8d6d43",14,1.7,-4,0.45,3.4,0.45);
-    block(root,"#8d6d43",18.0,2.4,-4,8.0,0.35,0.7);
-    sign(root,"CHORA",18.0,2.72,-3.6,0.62,"#f3e3a0");
+    block(root,"#8d6d43",39,1.7,-2,0.45,3.4,0.45);
+    block(root,"#8d6d43",43,2.4,-2,8,0.35,0.7);
+    sign(root,"CHORA",43,2.72,-1.6,0.62,"#f3e3a0");
 
     // White stone lanes: inland houses face these, while the beach row faces the sea.
     for(const [x,z,w,d,r] of [[28,54,82,4,0],[30,42,4,52,0],[8,62,4,46,0],[47,72,56,4,0],[30,28,76,4,0],[60,48,4,46,0],[16,79,46,4,0]]){
@@ -204,13 +205,17 @@
     }
     for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
 
-    // Continuous seafront road starts at the harbor apron, then follows the beach past Chora.
-    for(let i=0;i<48;i++){
-      const t=i/47;
-      const x=28+(86-28)*t;
-      const z=98+(84-98)*t + Math.sin(t*Math.PI)*1.6;
-      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.8,0.18,5.8);
-      road.rotation.y=Math.atan2(84-98,86-28);
+    // Seafront road: harbor/Noderunner are isolated at the left, road then meets Chora's beach-facing row.
+    const shoreRoad=[
+      [-24,96],[-14,96],[-4,96],[6,95],[18,94],[30,93],[44,92],[58,90],[72,87],[86,84]
+    ];
+    for(let i=0;i<shoreRoad.length-1;i++){
+      const a=shoreRoad[i], b=shoreRoad[i+1], dx=b[0]-a[0], dz=b[1]-a[1], n=Math.max(2,Math.ceil(Math.hypot(dx,dz)/3));
+      for(let j=0;j<n;j++){
+        const t=(j+0.5)/n, x=a[0]+dx*t, z=a[1]+dz*t;
+        const road=block(root,(i+j)%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.8,0.18,3.2);
+        road.rotation.y=Math.atan2(dx,dz);
+      }
     }
 
     // BIG BITCOIN's phrase belongs to its immediate side alley.
@@ -218,13 +223,13 @@
     sign(root,"Compliance Is Defiance",35,2.55,75.4,0.38,"#b51f2d");
 
     // Waterfront taverna / beach-bar and Noderunner TV gathering spot.
-    const tv=createNode({ position:{x:59,y:0,z:88}, rotation:{x:0,y:0,z:0} }); addChild(root,tv);
+    const tv=createNode({ position:{x:-11,y:0,z:96}, rotation:{x:0,y:0,z:0} }); addChild(root,tv);
     block(tv,"#f3efe7",0,2.4,0,14,4.8,8);
     block(tv,"#2b6599",0,4.9,0,14.5,0.45,8.5);
     sign(tv,"Noderunner Taverna",0,4.0,4.1,0.5,"#4fb7d5");
     block(tv,"#78543b",0,2.6,4.15,6.5,3.8,0.45);
     const tvScreen=createNode({ position:{x:0,y:2.7,z:4.42} }); addChild(tv,tvScreen);
-    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",59+x,0.45,96,1.6,0.8,1.6); block(root,"#386ea0",59+x,1.25,96,0.12,1.7,0.12); }
+    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",-11+x,0.45,104,1.6,0.8,1.6); block(root,"#386ea0",-11+x,1.25,104,0.12,1.7,0.12); }
 
     // Meme Factory House doubles as the existing shop interaction until interiors land.
     const meme=houses.find(h=>h.id==="meme-factory");
@@ -235,12 +240,12 @@
     const stage=studio.root;
     const mic=block(stage,"#b7b9c6",0,1.5,4.2,0.18,3,0.18);
 
-    // Harbor: a distinct shoreline destination in front of Chora, with its own apron and pier.
-    block(root,"#d2cabd",V2.harbor.x,0.1,V2.harbor.z-13,18,0.2,11);
-    const dock=block(root,"#8b7047",V2.harbor.x,0.05,V2.harbor.z,8,0.3,28);
-    for(const x of [V2.harbor.x-5,V2.harbor.x+5]) block(root,"#8b7047",x,0.03,V2.harbor.z+8,3.2,0.26,12);
-    sign(root,"HARBOR",V2.harbor.x,3.4,V2.harbor.z-16.5,0.8,"#f2d66e");
-    const boats=[boat(),boat(),boat()]; boats.forEach((b,i)=>{ b.position.x=V2.harbor.x-6+i*6; b.position.y=-0.15; b.position.z=V2.harbor.z+11; addChild(root,b); });
+    // Harbor district occupies its own left-side waterfront zone; Chora stays clear to the right.
+    block(root,"#d2cabd",V2.harbor.x,0.1,V2.harbor.z-13,22,0.2,12);
+    const dock=block(root,"#8b7047",V2.harbor.x,0.05,V2.harbor.z,8,0.3,30);
+    for(const x of [V2.harbor.x-6,V2.harbor.x+6]) block(root,"#8b7047",x,0.03,V2.harbor.z+9,3.4,0.26,13);
+    sign(root,"HARBOR",V2.harbor.x,3.4,V2.harbor.z-17,0.8,"#f2d66e");
+    const boats=[boat(),boat(),boat()]; boats.forEach((b,i)=>{ b.position.x=V2.harbor.x-6+i*6; b.position.y=-0.15; b.position.z=V2.harbor.z+12; addChild(root,b); });
 
     // Compact Bitcoin ride station lives inland near Olympus, never around the perimeter.
     const station=createNode({ position:{x:V2.station.x,y:0,z:V2.station.z} }); addChild(root,station);
