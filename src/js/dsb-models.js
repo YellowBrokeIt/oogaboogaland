@@ -74,9 +74,9 @@
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    [-52,-42,50],[-47,-35,47],[-57,-28,44],[-48,-21,41],[-58,-13,37],
-    [-47,-7,34],[-39,0,30],[-46,7,26],[-35,12,22],[-27,18,18],
-    [-16,22,14],[-6,27,10],[4,31,7],[13,34,4],[21,36,2]
+    [-52,-42,50],[-61,-36,48],[-67,-27,45],[-63,-17,42],[-55,-10,39],
+    [-44,-8,36],[-35,-12,33],[-29,-5,30],[-34,4,27],[-29,12,23],
+    [-20,18,19],[-10,21,15],[-2,24,11],[6,27,7],[14,29,4],[19,31,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -154,60 +154,63 @@
     // Chora: dense, irregular Cycladic lanes rather than a grid.
     const occupied=[
       // Inland properties face their local lanes rather than the sea.
-      {id:"meme-factory",label:"Meme Factory House",x:16,z:34,w:10,d:7,h:6.5,r:Math.PI/2,occupied:true,interior:"meme-factory",labelScale:0.34},
-      {id:"dsb-studio",label:"DSB Studio Stage",x:37,z:33,w:10,d:7,h:7,r:-Math.PI/2,occupied:true,interior:"dsb-studio",labelScale:0.37},
-      {id:"maxis",label:"Maxis Club Theater",x:53,z:22,w:10,d:7,h:6.5,r:Math.PI,occupied:true,labelScale:0.34},
-      {id:"without-rulers",label:"Without Rulers Shop",x:49,z:47,w:10,d:7,h:6,r:Math.PI/2,occupied:true,labelScale:0.32},
-      {id:"big-bitcoin",label:"Big Bitcoin",x:27,z:56,w:11,d:8,h:7,r:Math.PI,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
-      {id:"stackchain",label:"Stackchain Magazine",x:6,z:52,w:10,d:7,h:6,r:-Math.PI/2,occupied:true,labelScale:0.32},
-      {id:"proof-ink",label:"Proof Of Ink",x:-2,z:39,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
+      {id:"meme-factory",label:"Meme Factory House",x:18,z:48,w:10,d:7,h:6.5,r:Math.PI/2,occupied:true,interior:"meme-factory",labelScale:0.34},
+      {id:"dsb-studio",label:"DSB Studio Stage",x:39,z:47,w:10,d:7,h:7,r:-Math.PI/2,occupied:true,interior:"dsb-studio",labelScale:0.37},
+      {id:"maxis",label:"Maxis Club Theater",x:55,z:36,w:10,d:7,h:6.5,r:Math.PI,occupied:true,labelScale:0.34},
+      {id:"without-rulers",label:"Without Rulers Shop",x:51,z:61,w:10,d:7,h:6,r:Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"big-bitcoin",label:"Big Bitcoin",x:29,z:70,w:11,d:8,h:7,r:Math.PI,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
+      {id:"stackchain",label:"Stackchain Magazine",x:8,z:66,w:10,d:7,h:6,r:-Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"proof-ink",label:"Proof Of Ink",x:0,z:53,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
     ];
     for(const spec of occupied) houses.push(buildHouse(root,spec));
     const vacant=[
-      [0,23,8,6,5.5,Math.PI/2],[14,21,8,6,6,0],[29,18,8,7,6,Math.PI],[45,15,9,7,6,Math.PI],
-      [61,36,8,6,6,-Math.PI/2],[-1,57,8,7,6,Math.PI/2],[17,68,9,7,6,Math.PI],[36,72,8,6,6,Math.PI],
-      [56,66,9,7,6,Math.PI],[69,55,8,6,6,-Math.PI/2],[15,8,8,6,5.5,0],[32,5,8,6,6,0],
-      [50,4,8,6,6,Math.PI],[1,10,8,6,6,Math.PI/2],[67,18,8,6,6,-Math.PI/2],[72,45,8,6,6,-Math.PI/2]
+      // Inland homes: doors face the internal street network.
+      [3,37,8,6,5.5,Math.PI/2],[17,35,8,6,6,0],[32,32,8,7,6,Math.PI],[48,29,9,7,6,Math.PI],
+      [64,49,8,6,6,-Math.PI/2],[2,71,8,7,6,Math.PI/2],[18,82,9,7,6,Math.PI],[37,84,8,6,6,Math.PI],
+      [56,80,9,7,6,Math.PI],[70,69,8,6,6,-Math.PI/2],[17,22,8,6,5.5,0],[34,19,8,6,6,0],
+      [52,18,8,6,6,Math.PI],[3,24,8,6,6,Math.PI/2],[69,32,8,6,6,-Math.PI/2],[75,58,8,6,6,-Math.PI/2],
+      // Seafront homes: doors face the beach (+Z) and sit directly on the promenade.
+      [4,94,9,7,6,0],[20,96,9,7,6,0],[36,95,9,7,6,0],[52,93,9,7,6,0],[68,90,9,7,6,0],[80,86,9,7,6,0]
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // The Olympus descent ends in open foothill nature, not inside town.
-    block(root,"#8f8a66",24,0.12,38,24,0.24,16);
-    for(const [x,z] of [[15,35],[19,42],[29,34],[34,41]]){
+    // Olympus trail exits into open nature on the right side of the mountain, well behind Chora.
+    block(root,"#8f8a66",8,0.12,29,30,0.24,18);
+    for(const [x,z] of [[-1,26],[4,34],[13,25],[18,33]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    block(root,"#8d6d43",28,1.7,39,0.45,3.4,0.45);
-    block(root,"#8d6d43",31.2,2.4,39,6.5,0.35,0.7);
-    sign(root,"CHORA",31.1,2.72,39.4,0.62,"#f3e3a0");
+    block(root,"#8d6d43",19,1.7,31,0.45,3.4,0.45);
+    block(root,"#8d6d43",22.2,2.4,31,6.5,0.35,0.7);
+    sign(root,"CHORA",22.1,2.72,31.4,0.62,"#f3e3a0");
 
-    // White stone lanes and small squares connect clusters but leave deliberate maze-like gaps.
-    for(const [x,z,w,d,r] of [[25,40,78,4,0],[28,26,4,50,0],[6,48,4,46,0],[44,58,50,4,0],[28,14,72,4,0],[57,34,4,42,0]]){
+    // White stone lanes: inland houses face these, while the beach row faces the sea.
+    for(const [x,z,w,d,r] of [[28,54,82,4,0],[30,42,4,52,0],[8,62,4,46,0],[47,72,56,4,0],[30,28,76,4,0],[60,48,4,46,0],[16,79,46,4,0]]){
       const lane=block(root,"#d7d1c6",x,0.08,z,w,0.16,d); lane.rotation.y=r;
     }
-    for(const [x,z] of [[20,39],[42,49],[7,30],[55,24]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
+    for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]) block(root,"#c7c1b7",x,0.1,z,13,0.2,11);
 
-    // Shore road: continuous promenade from harbor to the far-right edge of Chora.
-    for(let i=0;i<34;i++){
-      const t=i/33;
-      const x=18+(72-18)*t;
-      const z=90+(72-90)*t + Math.sin(t*Math.PI)*2.5;
-      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.2,0.18,5.4);
-      road.rotation.y=Math.atan2(72-90,72-18);
+    // Continuous seafront road from the harbor past every beach-facing house to Chora's far-right edge.
+    for(let i=0;i<44;i++){
+      const t=i/43;
+      const x=18+(86-18)*t;
+      const z=91+(84-91)*t + Math.sin(t*Math.PI)*1.5;
+      const road=block(root,i%2?"#cfc8bb":"#ddd6c9",x,0.09,z,4.6,0.18,5.6);
+      road.rotation.y=Math.atan2(84-91,86-18);
     }
 
     // BIG BITCOIN's phrase belongs to its immediate side alley.
-    block(root,"#f1eee7",33,2.0,61.2,13,4,0.3);
-    sign(root,"Compliance Is Defiance",33,2.55,61.4,0.38,"#b51f2d");
+    block(root,"#f1eee7",35,2.0,75.2,13,4,0.3);
+    sign(root,"Compliance Is Defiance",35,2.55,75.4,0.38,"#b51f2d");
 
     // Waterfront taverna / beach-bar and Noderunner TV gathering spot.
-    const tv=createNode({ position:{x:58,y:0,z:78}, rotation:{x:0,y:Math.PI,z:0} }); addChild(root,tv);
+    const tv=createNode({ position:{x:59,y:0,z:88}, rotation:{x:0,y:0,z:0} }); addChild(root,tv);
     block(tv,"#f3efe7",0,2.4,0,14,4.8,8);
     block(tv,"#2b6599",0,4.9,0,14.5,0.45,8.5);
     sign(tv,"Noderunner Taverna",0,4.0,4.1,0.5,"#4fb7d5");
     block(tv,"#78543b",0,2.6,4.15,6.5,3.8,0.45);
     const tvScreen=createNode({ position:{x:0,y:2.7,z:4.42} }); addChild(tv,tvScreen);
-    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",58+x,0.45,84,1.6,0.8,1.6); block(root,"#386ea0",58+x,1.25,84,0.12,1.7,0.12); }
+    for(const x of [-5,-2.5,2.5,5]) { block(root,"#e7ddc8",59+x,0.45,96,1.6,0.8,1.6); block(root,"#386ea0",59+x,1.25,96,0.12,1.7,0.12); }
 
     // Meme Factory House doubles as the existing shop interaction until interiors land.
     const meme=houses.find(h=>h.id==="meme-factory");
