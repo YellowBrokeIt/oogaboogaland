@@ -158,8 +158,77 @@
     }
     return { id:spec.id,label:spec.label||"VACANT",root,door,sign:label,occupied:!!spec.occupied,interior:spec.interior||null };
   };
+  const buildMemeFactoryInterior = () => {
+    // Interiors are separate scene chunks. They are never rendered behind the exterior shell.
+    const root=createNode({ visible:false });
+
+    // Cycladic room shell: stone floor, white walls, blue trim, timber ceiling slats.
+    block(root,"#575350",0,-0.08,0,19,0.16,15);
+    for(let x=-8;x<=8;x+=2) block(root,"#e8e1d8",x,0.03,0,0.08,0.04,15);
+    for(let z=-6;z<=6;z+=2) block(root,"#e8e1d8",0,0.04,z,19,0.04,0.08);
+    block(root,"#f6f1e8",-9.4,3.5,0,0.55,7,15);
+    block(root,"#f6f1e8", 9.4,3.5,0,0.55,7,15);
+    block(root,"#f6f1e8",0,3.5,-7.3,19,7,0.55);
+    // Front wall leaves a doorway opening at +Z.
+    block(root,"#f6f1e8",-5.4,3.5,7.3,8,7,0.55);
+    block(root,"#f6f1e8", 5.4,3.5,7.3,8,7,0.55);
+    block(root,"#f6f1e8",0,6.05,7.3,3,1.9,0.55);
+    for(let x=-8.4;x<=8.4;x+=1.4) block(root,"#8a6646",x,6.85,0,0.18,0.18,14.4);
+
+    // Exit door / threshold.
+    const exitDoor=createNode({ position:{x:0,y:0,z:6.95} }); addChild(root,exitDoor);
+    block(exitDoor,"#2d6fa8",0,1.5,0,2.2,3,0.2);
+    sign(root,"EXIT",0,4.1,7.0,0.48,"#59b9df");
+
+    // Meme counter and shop interaction point.
+    const counter=createNode({ position:{x:0,y:0,z:-3.6} }); addChild(root,counter);
+    block(counter,"#8a6646",0,1.05,0,9.5,2.1,2.2);
+    block(counter,"#f0d99b",0,2.18,0,10,0.2,2.5);
+    sign(root,"MEME FACTORY",0,4.7,-7.0,0.72,C.yellow);
+
+    // Merchandise / silly production line.
+    for(const x of [-6.5,-3.2,3.2,6.5]){
+      block(root,"#315f8e",x,2.3,-6.85,2.1,2.6,0.18);
+      block(root,x<0?"#f2c84b":"#ef4f64",x,2.3,-6.7,1.3,1.45,0.12,0.25);
+    }
+    for(let i=0;i<5;i++){
+      const x=-5+i*2.5;
+      block(root,"#7f6042",x,0.5,1.5,1.7,1,1.5);
+      if(i%2===0){
+        const banana=BL.models.banana(); banana.position.x=x; banana.position.y=1.25; banana.position.z=1.5; addChild(root,banana);
+      } else block(root,"#ef4256",x,1.2,1.5,0.7,0.7,0.7);
+    }
+
+    // Side wall frames make this feel like a meme gallery rather than another empty shop.
+    const captions=["STACK","HODL","OOGA","21M"];
+    for(let i=0;i<captions.length;i++){
+      const z=-4.8+i*2.8;
+      block(root,i%2?"#c7e3ee":"#f2d79a",-9.05,2.8,z,0.18,2.7,2.3);
+      const caption=sign(root,captions[i],-8.92,2.45,z,0.34,i%2?"#2865a3":"#8f5a2c");
+      caption.rotation.y=Math.PI/2;
+    }
+
+    // Lounge corner.
+    block(root,"#386ea0",6.8,0.65,3.8,3.6,1.25,1.5);
+    block(root,"#e8ddc7",6.8,0.62,1.8,2.2,0.18,2.2);
+    block(root,"#b8754b",8.0,0.35,5.4,0.65,0.7,0.65);
+    block(root,"#568744",8.0,1.1,5.4,1.2,1.4,1.2);
+
+    return {
+      id:"meme-factory",
+      root,
+      exitDoor,
+      counter,
+      spawn:{x:0,y:0,z:5.1},
+      exit:{x:0,y:0,z:6.1},
+      counterAt:{x:0,y:0,z:-2.2},
+      bounds:{minX:-8.7,maxX:8.7,minZ:-6.6,maxZ:6.5}
+    };
+  };
+
   const build = () => {
     const root=createNode(), falls=[], spray=[], foam=[], houses=[];
+    const memeInterior=buildMemeFactoryInterior();
     const water=createNode({ geometry:disc(V2.oceanRadius,0.35,"#2b89c4"), position:{x:0,y:-0.82,z:0} }); addChild(root,water);
     const terrain=createNode({ geometry:disc(V2.radius,2.4,"#8b765d") }); addChild(root,terrain);
     const turtle=createNode(); addChild(root,turtle);
@@ -373,7 +442,7 @@
     return {
       landmarks:{ shop:landmark(shop,6,5), tv:landmark(tv,8,6) },
       root, terrain, turtle, water, foam, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station,
-      houses, groundAt, trailAt, updateEnvironment, v2:V2
+      houses, interiors:{ memeFactory:memeInterior }, groundAt, trailAt, updateEnvironment, v2:V2
     };
   };
   BL.dsbModels = { C, cube, block, text, sign, portaraFrame, boat, build };
