@@ -28,7 +28,7 @@
   const RENDER = { clear: [0.28, 0.62, 0.9], horizon: [0.48, 0.78, 0.98], zenith: [0.08, 0.38, 0.78], sky: [0.62, 0.82, 1], ground: [0.42, 0.38, 0.31], sun: [1, 0.95, 0.82], light: { x: -0.35, y: 0.88, z: 0.32 }, stars: 0, shadowCenter: { x: -12, y: 12, z: 18 }, shadowExtent: 135, bloomStrength: 0.28, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
   let root, camera, input, pilot, hud, renderer, world, game, go, land, transitGate, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu, conversation;
-  let exiting = false;
+  let exiting = false, insideHouse = "";
   let phase = "entrance", progress = 0, elapsed = 0, flash = 0, boatAngle = 0, rideAngle = 0, priceTimer = 0, tokens = 20, bread = 0, tomatoes = 0, throwAt = -1, fedUntil = 0, disposed = false, oldSheetHidden = false, oldSheetOpen = "true";
   let arrivalTime = 0, glanceTime = 3, lastCue = -1, glance = 0, gait = 0, avatarView = true;
   let lastPrice = "", lastBag = "", lastPrompt = "", savedRevision = -1, lastHeight = 0, skyPulse = 0;
@@ -79,9 +79,17 @@
   const cameraEnabled = () => phase === "land" && !exiting && !transitGate.isOpen && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
-  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 122 - radius
-    && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
-    && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius));
+  const clearAt = (x, z, radius = 0.35) => {
+    if (insideHouse === "meme-factory" && land?.interiors?.memeFactory) {
+      const b = land.interiors.memeFactory.bounds;
+      const inside = x > b.minX + radius && x < b.maxX - radius && z > b.minZ + radius && z < b.maxZ - radius;
+      const counterClear = !(Math.abs(x) < 5.25 + radius && z > -4.9 - radius && z < -2.15 + radius);
+      return inside && counterClear;
+    }
+    return Math.hypot(x, z) < 122 - radius
+      && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
+      && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius));
+  };
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
     for (let i = 1; i <= steps; i++) if (!clearAt(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, actor.bodyRadius)) return false;
@@ -97,8 +105,13 @@
   const near = (x, z, radius = 5) => { const p = location(); return Math.hypot(p.x - x, p.z - z) < radius; };
   const nearLandmark = name => !!land && land.landmarks[name].near(location());
   const clampTarget = (p) => {
-    const radius = Math.hypot(p.x, p.z);
     if (avatarView && !pilot?.player) p.y = 1.7;
+    if (insideHouse === "meme-factory" && land?.interiors?.memeFactory) {
+      if (!clearAt(p.x, p.z, avatar?.bodyRadius || 0.35)) { p.x = previous.x; p.z = previous.z; }
+      previous.x = p.x; previous.z = p.z;
+      return;
+    }
+    const radius = Math.hypot(p.x, p.z);
     if (radius > 122) { p.x *= 122 / radius; p.z *= 122 / radius; }
     // Keep only real landmark footprints solid; mountain travel is governed by the authored trail height.
     if (land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z))) { p.x = previous.x; p.z = previous.z; }
@@ -193,6 +206,11 @@
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
     if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
+    if (insideHouse === "meme-factory") {
+      if (near(0, 5.8, 2.2)) return "house-exit";
+      if (near(0, -1.7, 3.2)) return "shop-counter";
+      return "";
+    }
     if (nearDialer()) return "dialer";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
@@ -201,7 +219,7 @@
     if (nearZuzu()) return "zuzu";
     return "";
   };
-  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
+  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Enter Meme Factory House", "shop-counter": "Browse Meme Factory counter", "house-exit": "Exit Meme Factory House" };
   const syncContext = () => {
     const kind = contextAction();
     if (kind === lastContext) return;
@@ -217,12 +235,35 @@
     if (phase !== "land" || !nearLandmark("tv") || location().y > 6) { toast("Walk up to the screen facing the Ooga Portal plaza to open it."); return; }
     tv.open(); syncPlayer();
   };
+  const enterMemeFactory = () => {
+    if (phase !== "land" || insideHouse || !nearLandmark("shop") || !land?.interiors?.memeFactory) {
+      toast("Walk up to the Meme Factory House entrance."); return;
+    }
+    const interior=land.interiors.memeFactory;
+    insideHouse="meme-factory";
+    land.root.visible=false; interior.root.visible=true; transitGate.root.visible=false;
+    avatar.root.position.x=interior.spawn.x; avatar.root.position.y=avatar.baseY; avatar.root.position.z=interior.spawn.z;
+    avatar.root.rotation.y=Math.PI; previous.x=avatar.root.position.x; previous.z=avatar.root.position.z;
+    pilot.possess(avatar); pilot.enterClose(); pilot.update(0); syncContext();
+    toast("Meme Factory House · first rentable-property interior prototype.");
+  };
+  const exitMemeFactory = () => {
+    if (insideHouse !== "meme-factory") return;
+    const exterior={}; land.landmarks.shop.point(0,0,6.3,exterior);
+    insideHouse="";
+    land.interiors.memeFactory.root.visible=false; land.root.visible=true; transitGate.root.visible=true;
+    avatar.root.position.x=exterior.x; avatar.root.position.y=avatar.baseY; avatar.root.position.z=exterior.z;
+    avatar.root.rotation.y=land.shop.rotation.y+Math.PI; previous.x=exterior.x; previous.z=exterior.z;
+    document.getElementById("dsb-shop").hidden=true;
+    pilot.possess(avatar); pilot.enterClose(); pilot.update(0); syncContext();
+    toast("Back in Chora.");
+  };
   const openShop = () => {
-    if (phase !== "land" || !nearLandmark("shop")) { toast("Visit the meme stand facing the Ooga Portal plaza."); return; }
+    if (insideHouse !== "meme-factory" || !near(0,-1.7,3.4)) { toast("Use the counter inside Meme Factory House."); return; }
     panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false; syncPlayer();
   };
   const buy = (kind) => {
-    if (phase !== "land" || !nearLandmark("shop")) { toast("Purchases happen at the meme stand."); return; }
+    if (phase !== "land" || insideHouse !== "meme-factory" || !near(0,-1.7,3.4)) { toast("Purchases happen at the Meme Factory counter."); return; }
     const price = kind === "bread" ? 3 : 1;
     if (tokens < price) { toast("No demo tokens left this visit."); return; }
     if ((kind === "bread" ? bread : kind === "banana" ? bananas : tomatoes) >= 9) { toast("Your bag holds nine of each item."); return; }
@@ -248,11 +289,16 @@
   const act = () => {
     if (phase === "boat" || phase === "coaster") { stopRide(); return true; }
     if (phase !== "land") return true;
+    if (insideHouse === "meme-factory") {
+      if (near(0,5.8,2.2)) exitMemeFactory();
+      else if (near(0,-1.7,3.2)) openShop();
+      return true;
+    }
     if (nearDialer()) transitGate.open();
     else if (atDock()) board("boat");
     else if (atStation()) board("coaster");
     else if (nearLandmark("tv")) openTv();
-    else if (nearLandmark("shop")) openShop();
+    else if (nearLandmark("shop")) enterMemeFactory();
     else if (nearZuzu()) conversation.open();
     else if (near(18, 27, 7)) perform();
     else throwTomato();
@@ -265,7 +311,9 @@
     else if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
-    else if (owner.kind === "shop") openShop();
+    else if (owner.kind === "shop") { if (insideHouse) openShop(); else enterMemeFactory(); }
+    else if (owner.kind === "meme-exit") exitMemeFactory();
+    else if (owner.kind === "meme-counter") openShop();
     else if (owner.kind === "boat" || owner.kind === "coaster") board(owner.kind);
     else if (owner.kind === "stage") perform();
   };
@@ -310,6 +358,7 @@
     if (phase === "arrival" && (event.key === "Escape" || event.key === " " || event.key === "Enter")) { finishArrival(); return; }
     if (event.key === "Escape") {
       if (!document.getElementById("dsb-shop").hidden) document.getElementById("dsb-shop").hidden = true;
+      else if (insideHouse === "meme-factory") exitMemeFactory();
       else if (phase === "boat" || phase === "coaster") stopRide(); else returnHub();
     } else if (event.key === "0") action("reset-view");
     else if (event.key.toLowerCase() === "t") throwTomato();
@@ -357,12 +406,12 @@
           Object.assign(transitPrevious, avatar.root.position); transitPrevious.y += avatar.bodyHeight / 2 - avatar.baseY;
           crew.update(dt, time);
           Object.assign(transitCurrent, avatar.root.position); transitCurrent.y += avatar.bodyHeight / 2 - avatar.baseY;
-          if (transitGate.traverse(transitPrevious, transitCurrent, avatar.bodyRadius, 1)) return;
+          if (!insideHouse && transitGate.traverse(transitPrevious, transitCurrent, avatar.bodyRadius, 1)) return;
         }
         pilot.update(dt);
       }
     } else avatar.root.visible = phase === "arrival";
-    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
+    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = !insideHouse && (playerEnabled() || conversation.isOpen && phase === "land" && !exiting);
     zuzu.update(dt, time, agentPerception);
     // V2 scale pass keeps the future catamarans moored; free-sail controls come next.
     for (let i = 0; i < land.boats.length; i++) {
@@ -435,6 +484,11 @@
   const buildLand = () => {
     if (land) return;
     land = M.build(); addChild(root, land.root);
+    if (land.interiors?.memeFactory) {
+      addChild(root, land.interiors.memeFactory.root);
+      register(land.interiors.memeFactory.exitDoor, "meme-exit", "Exit Meme Factory House");
+      register(land.interiors.memeFactory.counter, "meme-counter", "Meme Factory counter");
+    }
     // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
     Object.assign(transitGate.dialer.position, { x: OLYMPUS_GATE.x + transitGate.outerRadius + 1.4, y: SUMMIT_SPAWN.y, z: OLYMPUS_GATE.z + 3.2 });
     transitGate.dialer.rotation.y = Math.PI;
@@ -462,11 +516,11 @@
     }
     for (let i = 0; i < 12; i++) { const node = M.block(land.root, "#ef4256", 0, 0, 0, 0.28, 0.28, 0.28); node.visible = false; shots.push({ node, life: 0, vx: 0, vy: 0, vz: 0, splat: false }); }
     register(land.tv, "tv", "DSB TV - walk closer to open");
-    register(land.shop, "shop", "DSB meme stand · bread and tomatoes"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy");
+    register(land.shop, "shop", "Meme Factory House · enter"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy");
     RENDER.lights.set([18, 6, 78, 22, 1, 0.78, 0.42, 0, -52, 58, -48, 18, 0.7, 0.9, 1, 0]);
   };
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx); disposed = false; exiting = false; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
+    ({ renderer, game, world, go } = ctx); disposed = false; exiting = false; insideHouse = ""; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
     tokens = 20; bread = tomatoes = bananas = 0; boatTrip.angle = 0; trainTrip.angle = START; boatTrip.wait = trainTrip.wait = WAIT; rideYaw = ridePitch = 0; lastContext = "init"; throwAt = -1; fedUntil = 0; priceTimer = 0; savedRevision = -1; lastHeight = skyPulse = 0; lastPrice = lastBag = lastPrompt = "";
     root = createNode(); camera = createCamera({ fov: 55, near: 0.1, far: 600 });
     land = data = tv = zuzu = conversation = null;
