@@ -88,10 +88,11 @@
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    // Wrap around Olympus, then finish clearly on the open plain at the mountain's far-right side.
+    // Wrap around Olympus, then continue across the mountain's right flank to the blue-marked open plain.
     [-52,-42,50],[-63,-38,48],[-72,-31,46],[-76,-21,43],[-72,-11,40],
     [-64,-2,37],[-53,3,34],[-42,3,31],[-31,-1,28],[-21,-7,24],
-    [-10,-11,20],[1,-12,16],[11,-10,12],[20,-8,8],[28,-6,4],[34,-4,2]
+    [-10,-11,20],[1,-12,16],[11,-10,12],[20,-8,9],[30,-7,7],[40,-6,5],
+    [50,-5,4],[60,-4,3],[68,-3,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -329,14 +330,15 @@
       for(let q=-w/2+1;q<w/2;q+=2.2) natureBox(foothillNature,"#6f8b48",x+q,0.35,z,0.25,0.7,d-0.8);
     }
 
-    // Open plain between Olympus and Chora: grassland, scattered olives, rocks and a tiny roadside shrine.
-    for(const [x,z] of [[36,10],[44,8],[51,13],[32,17],[47,20],[57,21],[24,11],[61,13]])
+    // Open plain between Olympus and Chora: keep the trail exit itself open, dress the perimeter.
+    for(const [x,z] of [[34,10],[44,11],[51,15],[31,18],[45,21],[55,23],[25,12],[86,10],[91,17]])
       addGrassPatch(plainNature,x,0,z,1.55);
-    for(const [x,z,sc] of [[52,5,0.9],[58,15,1.0],[42,19,0.85],[30,12,0.8]]) addOlive(plainNature,x,0,z,sc);
-    for(const [x,z,sc] of [[25,4,0.8],[49,-4,0.9],[59,6,0.7]]) addRockCluster(plainNature,x,0,z,sc);
-    natureBox(plainNature,"#eee8de",56,1.6,6,2.4,3.2,1.8);
-    natureBox(plainNature,"#2e6da2",56,1.45,6.95,0.8,1.5,0.12);
-    natureBox(plainNature,"#e2d5bd",56,3.35,6,3.1,0.35,2.2);
+    for(const [x,z,sc] of [[50,8,0.9],[56,17,1.0],[42,20,0.85],[30,13,0.8],[88,4,0.9]]) addOlive(plainNature,x,0,z,sc);
+    for(const [x,z,sc] of [[25,5,0.8],[48,-9,0.9],[89,-7,0.7]]) addRockCluster(plainNature,x,0,z,sc);
+    // Roadside shrine moved away from the blue exit clearing.
+    natureBox(plainNature,"#eee8de",48,1.6,8,2.4,3.2,1.8);
+    natureBox(plainNature,"#2e6da2",48,1.45,8.95,0.8,1.5,0.12);
+    natureBox(plainNature,"#e2d5bd",48,3.35,8,3.1,0.35,2.2);
 
     // Coastal texture: low scrub, beach grass and rock groupings away from the promenade.
     for(const [x,z] of [[-50,94],[-42,101],[-35,88],[88,75],[96,67],[101,58],[-70,72],[-78,63]])
@@ -403,11 +405,11 @@
     // Trail retaining walls / parapets on selected outer bends.
     for(const [x,y,z,w,d] of [
       [-69,43,-30,10,0.55],[-72,39,-15,9,0.55],[-58,34,1,11,0.55],[-39,28,3,9,0.55],
-      [-20,21,-7,10,0.55],[-2,14,-12,8,0.55],[18,7,-8,8,0.55]
+      [-20,21,-7,10,0.55],[-2,14,-12,8,0.55],[18,8,-8,8,0.55],[38,5,-6,9,0.55],[58,3,-4,9,0.55]
     ]) natureBox(travelDetail,"#9c8e7d",x,y,z,w,1.1,d);
 
     // Small overlook platforms and benches.
-    for(const [x,y,z] of [[-67,40,-18],[-47,30,1],[-24,20,8],[6,10,-8]]){
+    for(const [x,y,z] of [[-67,40,-18],[-47,30,1],[-24,20,8],[6,10,-8],[42,4,-6]]){
       natureBox(travelDetail,"#c9baa3",x,y,z,7,0.35,5);
       natureBox(travelDetail,"#775b3e",x,y+0.65,z+1.4,3.2,0.45,0.7);
       natureBox(travelDetail,"#775b3e",x,y+1.15,z+1.65,3.2,0.9,0.25);
@@ -470,15 +472,16 @@
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // Trail exit clearing: separated from both Olympus and Chora, at the requested right-side plain.
-    block(root,"#8f8a66",36,0.12,-2,30,0.24,22);
-    for(const [x,z] of [[27,-10],[30,2],[41,-9],[47,2]]){
+    // Trail exit clearing: the actual end now sits in the blue-marked open plain, well right of Olympus.
+    block(root,"#8f8a66",70,0.12,-2,34,0.24,24);
+    for(const [x,z] of [[58,-10],[61,4],[76,-10],[82,3]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    block(root,"#8d6d43",39,1.7,-2,0.45,3.4,0.45);
-    block(root,"#8d6d43",43,2.4,-2,8,0.35,0.7);
-    sign(root,"CHORA",43,2.72,-1.6,0.62,"#f3e3a0");
+    // CHORA sign stands at the end of the trail and points the player toward the town beyond the open ground.
+    block(root,"#8d6d43",70,1.7,-2,0.45,3.4,0.45);
+    block(root,"#8d6d43",74,2.4,-2,8,0.35,0.7);
+    sign(root,"CHORA",74,2.72,-1.6,0.62,"#f3e3a0");
 
     // Chora lanes: dark island-stone paving with pale joints, tighter and more irregular than the open island roads.
     const townLanes=[[28,54,82,4],[30,42,4,52],[8,62,4,46],[47,72,56,4],[30,28,76,4],[60,48,4,46],[16,79,46,4]];
