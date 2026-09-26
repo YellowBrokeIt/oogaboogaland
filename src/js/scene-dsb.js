@@ -241,6 +241,7 @@
     }
     const interior=land.interiors.memeFactory;
     insideHouse="meme-factory";
+    audio.enterInterior?.("meme-factory");
     land.root.visible=false; interior.root.visible=true; transitGate.root.visible=false;
     avatar.root.position.x=interior.spawn.x; avatar.root.position.y=avatar.baseY; avatar.root.position.z=interior.spawn.z;
     avatar.root.rotation.y=Math.PI; previous.x=avatar.root.position.x; previous.z=avatar.root.position.z;
@@ -251,6 +252,7 @@
     if (insideHouse !== "meme-factory") return;
     const exterior={}; land.landmarks.shop.point(0,0,6.3,exterior);
     insideHouse="";
+    audio.leaveInterior?.();
     land.interiors.memeFactory.root.visible=false; land.root.visible=true; transitGate.root.visible=true;
     avatar.root.position.x=exterior.x; avatar.root.position.y=avatar.baseY; avatar.root.position.z=exterior.z;
     avatar.root.rotation.y=land.shop.rotation.y+Math.PI; previous.x=exterior.x; previous.z=exterior.z;
@@ -435,7 +437,7 @@
     fx.update(dt);
     land.landmarks.tv.point(-0.55, 3.3, 1.63, radioSource);
     audio.environment(camera, land.boats[0].position, dt, radioSource);
-    land.updateEnvironment?.(time, camera.position, phase === "arrival");
+    if (!insideHouse) land.updateEnvironment?.(time, camera.position, phase === "arrival");
     for (let i = 0; i < land.falls.length; i++) { const f = land.falls[i]; f.glow = 0.55 + 0.2 * Math.sin(time * 3 + i * 0.4); f.scale.y = 7.5 + 0.5 * Math.sin(time * 1.7 + i); land.spray[i].position.y = -0.5 - (time * 4 + i * 0.71) % 11; }
     if (data.state.height !== lastHeight) { if (lastHeight) skyPulse = 1; lastHeight = data.state.height; }
     skyPulse = Math.max(0, skyPulse - dt * 0.25);
