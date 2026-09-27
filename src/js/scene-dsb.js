@@ -13,14 +13,14 @@
   const STATION = { yaw: 0, pitch: 0, dist: 12, target: { x: -34, y: 1.7, z: -20 }, position: { x: -34, y: 0, z: -20 } };
   const FLYOVER_SECONDS = 15, GLORY_HOLD_SECONDS = 4, ARRIVAL_SECONDS = FLYOVER_SECONDS + GLORY_HOLD_SECONDS;
   const ARRIVAL_KEYS = [
-    { t: 0.0,  p: [-52, 53.5, -48], q: [-52, 51.5, -36] },
-    { t: 1.6,  p: [-52, 53.2, -42], q: [-48, 48, -27] },
-    { t: 3.4,  p: [-47, 47, -25], q: [-36, 34, -7] },
-    { t: 5.5,  p: [-24, 30, -6], q: [-8, 15, 18] },
-    { t: 7.8,  p: [70, 15, 18], q: [30, 8, 52] },
-    { t: 10.0, p: [96, 10, 82], q: [46, 5, 92] },
-    { t: 12.3, p: [58, 12, 166], q: [34, 8, 86] },
-    { t: 15.0, p: [22, 58, 296], q: [14, 16, 42] }
+    { t: 0.0,  p: [-52, 53.5, -48], q: [-52, 51.5, -35] },
+    { t: 1.6,  p: [-49, 52.5, -38], q: [-47, 45, -20] },
+    { t: 3.4,  p: [-43, 45, -18], q: [-34, 31, 4] },
+    { t: 5.5,  p: [-20, 30, 6], q: [2, 15, 24] },
+    { t: 7.8,  p: [76, 16, 28], q: [38, 8, 62] },
+    { t: 10.0, p: [104, 10, 88], q: [48, 5, 98] },
+    { t: 12.3, p: [62, 13, 176], q: [36, 8, 94] },
+    { t: 15.0, p: [20, 60, 304], q: [12, 16, 54] }
   ];
   const START = 0, WAIT = 8;
   const boatTrip = { angle: 0, wait: WAIT, start: 0, speed: 0.13 }, trainTrip = { angle: START, wait: WAIT, start: START, speed: 0.2 };
@@ -302,7 +302,7 @@
     else if (nearLandmark("tv")) openTv();
     else if (nearLandmark("shop")) enterMemeFactory();
     else if (nearZuzu()) conversation.open();
-    else if (near(18, 27, 7)) perform();
+    else if (near(42, 53, 7)) perform();
     else throwTomato();
     return true;
   };
@@ -341,12 +341,12 @@
     else if (name === "dsb-stop" && (phase === "boat" || phase === "coaster")) stopRide();
     else if (name === "act") pilot.action();
     else if (playerEnabled() && (name.startsWith("weapon-") || name === "magazine-swap")) pilot.weaponAction(name);
-    else if (name === "reset-view" && phase === "land") { avatarView = true; previous.x = 0; previous.z = 26; if (!pilot.player) pilot.possess(avatar); syncPlayer(); pilot.enterClose(); pilot.navigate(VIEW); }
+    else if (name === "reset-view" && phase === "land") { avatarView = true; previous.x = SUMMIT_SPAWN.x; previous.z = SUMMIT_SPAWN.z; if (!pilot.player) pilot.possess(avatar); syncPlayer(); pilot.enterClose(); pilot.navigate(VIEW); }
     else if (name === "dsb-lookout" && phase === "land") { avatarView = false; syncPlayer(); pilot.goPreset("lookout"); }
   };
   const playerAction = () => {
     if (!playerEnabled()) { if (phase === "boat" || phase === "coaster") act(); return true; }
-    if (contextAction() || near(18, 27, 7)) { act(); return true; }
+    if (contextAction() || near(42, 53, 7)) { act(); return true; }
     return false;
   };
   const onKey = (event) => {
@@ -512,14 +512,14 @@
     buildRide();
     for (let i = 0; i < 6; i++) {
       const contributor = BL.contributors.roster[i % BL.contributors.roster.length], cave = BL.models.caveman(BL.contributors.traitsFor(contributor.name));
-      cave.baseY = cave.root.position.y; cave.floorY = 0; cave.root.position.x = -4 + (i % 3) * 12; cave.root.position.z = 34 + Math.floor(i / 3) * 10; cave.heading = Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
+      cave.baseY = cave.root.position.y; cave.floorY = 0; cave.root.position.x = 14 + (i % 3) * 16; cave.root.position.z = 61 + Math.floor(i / 3) * 13; cave.heading = Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
       addChild(land.root, cave.root); visitors.push(cave); input.add(cave.root, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }, { radius: 1 }); targets.push(cave.root);
       for (const key of ["head", "torso", "armL", "armR", "legL", "legR"]) { const node = cave.parts[key]; input.add(node, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }); targets.push(node); }
     }
     for (let i = 0; i < 12; i++) { const node = M.block(land.root, "#ef4256", 0, 0, 0, 0.28, 0.28, 0.28); node.visible = false; shots.push({ node, life: 0, vx: 0, vy: 0, vz: 0, splat: false }); }
     register(land.tv, "tv", "DSB TV - walk closer to open");
     register(land.shop, "shop", "Meme Factory House · enter"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy");
-    RENDER.lights.set([18, 6, 78, 22, 1, 0.78, 0.42, 0, -52, 58, -48, 18, 0.7, 0.9, 1, 0]);
+    RENDER.lights.set([34, 6, 86, 24, 1, 0.78, 0.42, 0, -52, 58, -48, 18, 0.7, 0.9, 1, 0]);
   };
   const enter = (ctx) => {
     ({ renderer, game, world, go } = ctx); disposed = false; exiting = false; insideHouse = ""; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
