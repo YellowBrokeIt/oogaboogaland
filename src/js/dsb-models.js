@@ -88,11 +88,11 @@
     station: { x: -34, z: -20 }
   };
   const TRAIL = [
-    // Back-side route: circle Olympus on the sea/cliff side first, then curl down its right flank.
-    [-52,-42,50],[-60,-49,48],[-58,-58,46],[-48,-64,44],[-36,-65,41],
-    [-24,-61,38],[-15,-54,35],[-10,-44,32],[-9,-34,29],[-5,-27,26],
-    [2,-23,22],[10,-20,18],[18,-18,14],[27,-16,10],[36,-14,7],
-    [44,-12,4],[52,-10,2]
+    // Approved master route: always on the visible/front side of Olympus.
+    // It wraps across several faces, then leaves the mountain at the right-side clearing.
+    [-52,-42,50],[-46,-35,47],[-56,-28,44],[-49,-20,41],[-58,-12,37],
+    [-49,-5,34],[-40,2,30],[-32,9,26],[-23,14,22],[-13,18,18],
+    [-2,20,14],[9,20,10],[20,18,7],[31,16,4],[43,15,2]
   ];
   const trailSample = (x,z) => {
     let best=Infinity,height=0;
@@ -370,39 +370,38 @@
     addNatureBatch(root,plainNature);
     addNatureBatch(root,coastNature);
 
-    // Switchback trail is carved into a continuous Olympus shoulder: no air gap between path and mountain.
+    // Approved trail geometry: continuous, grounded and visibly attached to Olympus.
     const mountainTopAt=(x,z)=>{
       let top=0;
       for(const [dx,cy,dz,w,h,d] of tiers){
         const cx=ox+dx, cz=oz+dz;
         if(Math.abs(x-cx)<=w/2 && Math.abs(z-cz)<=d/2) top=Math.max(top,cy+h/2);
       }
-      // Rear cliff/cape counts as Olympus terrain too.
       for(const [cx,cy,cz,w,h,d] of rearCliff)
         if(Math.abs(x-cx)<=w/2 && Math.abs(z-cz)<=d/2) top=Math.max(top,cy+h/2);
       return top;
     };
     for(let i=0;i<TRAIL.length-1;i++){
       const a=TRAIL[i],b=TRAIL[i+1],dx=b[0]-a[0],dz=b[1]-a[1];
-      const distance=Math.hypot(dx,dz), steps=Math.max(5,Math.ceil(distance/0.65)), heading=Math.atan2(dx,dz);
+      const distance=Math.hypot(dx,dz), steps=Math.max(6,Math.ceil(distance/0.6)), heading=Math.atan2(dx,dz);
       for(let j=0;j<=steps;j++){
         const t=j/steps,x=a[0]+dx*t,z=a[1]+dz*t,y=a[2]+(b[2]-a[2])*t;
-        const base=mountainTopAt(x,z), support=Math.max(0.4,y-base);
+        const mountainTop=mountainTopAt(x,z);
+        const base=Math.max(0,Math.min(mountainTop,y-0.35));
+        const supportHeight=Math.max(0.7,y-base+0.25);
         const rockColor=y>36?"#aaa091":y>24?"#8c8278":y>12?"#756d64":"#8b806e";
 
-        // Wide rocky bench directly under the path.
-        const bed=block(root,rockColor,x,base+support/2-0.05,z,10.5,support+0.25,4.8);
+        // Overlapping voxel terrace beneath every trail sample: never floating.
+        const bed=block(root,rockColor,x,base+supportHeight/2-0.12,z,8.6,supportHeight,5.6);
         bed.rotation.y=heading;
 
-        // Bridge from the trail inward toward Olympus' body, overlapping the mountain so no slit of sky can appear.
-        const vx=ox-x, vz=oz-z, vd=Math.hypot(vx,vz) || 1;
-        const reach=Math.min(11,Math.max(4.5,vd-18));
-        const nx=vx/vd, nz=vz/vd, cx=x+nx*reach/2, cz=z+nz*reach/2;
-        const shoulder=block(root,rockColor,cx,base+support/2-0.08,cz,reach+4.5,support+0.3,7.2);
+        // Blend the outer shelf back into Olympus with a broad rocky shoulder.
+        const vx=ox-x,vz=oz-z,vd=Math.hypot(vx,vz)||1,nx=vx/vd,nz=vz/vd;
+        const reach=Math.min(13,Math.max(5,vd-15));
+        const shoulder=block(root,rockColor,x+nx*reach/2,base+supportHeight/2-0.16,z+nz*reach/2,reach+6.0,supportHeight+0.1,8.2);
         shoulder.rotation.y=Math.atan2(nx,nz)+Math.PI/2;
 
-        // Tread sits slightly embedded into the rocky shelf.
-        const tread=block(root,j%4?"#cdbd9f":"#e1d0ae",x,y-0.02,z,5.4,0.28,1.35);
+        const tread=block(root,j%4?"#d4c4a7":"#ead9b9",x,y-0.03,z,5.2,0.3,1.45);
         tread.rotation.y=heading;
       }
     }
@@ -416,59 +415,34 @@
       block(root,"#597d3b",x,y+2.4,z,2.6,1.8,2.2);
     }
 
-    // More authored travel beats between summit, foothills and town.
-    // These are deliberately visible from the trail so the descent feels like crossing a small world.
+    // Grounded travel beats between Olympus and Chora.
     const travelDetail=[];
-
-    // Exposed cliff ribs and ledges make Olympus read as a mountain rather than stacked boxes.
-    for(const [x,y,z,w,h,d,c] of [
-      [-76,31,-43,8,12,3,"#5d5955"],[-70,24,-22,11,10,3,"#69635d"],[-60,18,-4,13,8,3,"#756d64"],
-      [-44,22,-10,10,12,3,"#6d665f"],[-35,16,3,12,8,3,"#81776c"],[-27,11,12,11,6,3,"#8f8274"]
-    ]) natureBox(travelDetail,c,x,y,z,w,h,d);
-
-    // Trail retaining walls / parapets on selected outer bends.
-    for(const [x,y,z,w,d] of [
-      [-69,43,-30,10,0.55],[-72,39,-15,9,0.55],[-58,34,1,11,0.55],[-39,28,3,9,0.55],
-      [-20,21,-7,10,0.55],[-2,14,-12,8,0.55],[18,8,-8,8,0.55],[38,5,-6,9,0.55],[58,3,-4,9,0.55]
-    ]) natureBox(travelDetail,"#9c8e7d",x,y,z,w,1.1,d);
-
-    // Small overlook platforms and benches.
-    for(const [x,y,z] of [[-67,40,-18],[-47,30,1],[-24,20,8],[6,10,-8],[42,4,-6]]){
-      natureBox(travelDetail,"#c9baa3",x,y,z,7,0.35,5);
-      natureBox(travelDetail,"#775b3e",x,y+0.65,z+1.4,3.2,0.45,0.7);
-      natureBox(travelDetail,"#775b3e",x,y+1.15,z+1.65,3.2,0.9,0.25);
-    }
-
-    // Foothill roadside chapel and isolated Cycladic homes before Chora.
-    for(const [x,z,r] of [[6,22,0],[22,28,Math.PI/2],[46,20,Math.PI]]){
+    // Visible cliff ribs, all rooted at y=0.
+    for(const [x,z,w,h,d,c] of [
+      [-75,-38,8,16,5,"#5d5955"],[-66,-22,10,13,5,"#69635d"],[-55,-7,11,10,5,"#756d64"],
+      [-42,5,10,8,5,"#81776c"],[-28,13,10,6,5,"#8f8274"]
+    ]) natureBox(travelDetail,c,x,h/2,z,w,h,d);
+    // Open-ground roadside chapel and isolated pre-Chora homes.
+    for(const [x,z] of [[7,30],[24,31],[49,29]]){
       natureBox(travelDetail,"#f4f0e8",x,2.2,z,6.5,4.4,5.2);
       natureBox(travelDetail,"#e4ddd1",x,4.55,z,6.8,0.3,5.5);
-      // Blue door is authored on the approximate road-facing side.
-      const dx=Math.sin(r)*2.7, dz=Math.cos(r)*2.7;
-      natureBox(travelDetail,"#2e71a6",x+dx,1.35,z+dz,1.25,2.7,0.18);
+      natureBox(travelDetail,"#2e71a6",x,1.35,z+2.7,1.25,2.7,0.18);
     }
-    natureBox(travelDetail,"#f5f0e7",53,1.7,12,3.6,3.4,3.0);
-    natureBox(travelDetail,"#2d6fa8",53,1.25,13.55,0.9,2.5,0.12);
-    natureBox(travelDetail,"#ded2c2",53,3.55,12,4.2,0.35,3.5);
-
-    // A few field gates and olive terraces frame the final walk to Chora without blocking it.
-    for(const [x,z] of [[13,31],[31,25],[46,29]]){
-      natureBox(travelDetail,"#8e806e",x,0.6,z,10,1.2,0.45);
-      natureBox(travelDetail,"#73563a",x-1.2,1.25,z+0.1,0.22,2.5,0.22);
-      natureBox(travelDetail,"#73563a",x+1.2,1.25,z+0.1,0.22,2.5,0.22);
-    }
+    // Low dry-stone boundaries that frame, but never block, the route to Chora.
+    for(const [x,z,w,d] of [[8,35,12,0.5],[28,34,12,0.5],[52,34,12,0.5]])
+      natureBox(travelDetail,"#8e806e",x,0.6,z,w,1.2,d);
     addNatureBatch(root,travelDetail);
 
     // Chora: dense, irregular Cycladic lanes rather than a grid.
     const occupied=[
-      // Inland properties face their local lanes rather than the sea.
-      {id:"meme-factory",label:"Meme Factory House",x:18,z:48,w:10,d:7,h:6.5,r:Math.PI/2,occupied:true,interior:"meme-factory",labelScale:0.34},
-      {id:"dsb-studio",label:"DSB Studio Stage",x:39,z:47,w:10,d:7,h:7,r:-Math.PI/2,occupied:true,interior:"dsb-studio",labelScale:0.37},
-      {id:"maxis",label:"Maxis Club Theater",x:55,z:36,w:10,d:7,h:6.5,r:Math.PI,occupied:true,labelScale:0.34},
-      {id:"without-rulers",label:"Without Rulers Shop",x:51,z:61,w:10,d:7,h:6,r:Math.PI/2,occupied:true,labelScale:0.32},
-      {id:"big-bitcoin",label:"Big Bitcoin",x:29,z:70,w:11,d:8,h:7,r:Math.PI,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
-      {id:"stackchain",label:"Stackchain Magazine",x:15,z:66,w:10,d:7,h:6,r:-Math.PI/2,occupied:true,labelScale:0.32},
-      {id:"proof-ink",label:"Proof Of Ink",x:0,z:53,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
+      // Inland properties face Chora's internal streets; the whole town sits closer to the shore.
+      {id:"meme-factory",label:"Meme Factory House",x:20,z:54,w:10,d:7,h:6.5,r:Math.PI/2,occupied:true,interior:"meme-factory",labelScale:0.34},
+      {id:"dsb-studio",label:"DSB Studio Stage",x:42,z:53,w:10,d:7,h:7,r:-Math.PI/2,occupied:true,interior:"dsb-studio",labelScale:0.37},
+      {id:"maxis",label:"Maxis Club Theater",x:59,z:45,w:10,d:7,h:6.5,r:Math.PI,occupied:true,labelScale:0.34},
+      {id:"without-rulers",label:"Without Rulers Shop",x:58,z:68,w:10,d:7,h:6,r:Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"big-bitcoin",label:"Big Bitcoin",x:33,z:77,w:11,d:8,h:7,r:Math.PI,occupied:true,plaqueColor:"#c42026",labelColor:"#ffffff",labelScale:0.48},
+      {id:"stackchain",label:"Stackchain Magazine",x:17,z:72,w:10,d:7,h:6,r:-Math.PI/2,occupied:true,labelScale:0.32},
+      {id:"proof-ink",label:"Proof Of Ink",x:4,z:61,w:9,d:7,h:6,r:0,occupied:true,labelScale:0.42}
     ];
     for(const spec of occupied) houses.push(buildHouse(root,spec));
     // Named properties get recognizable silhouettes/accents without changing the shared addressable-house system.
@@ -486,28 +460,29 @@
     }
 
     const vacant=[
-      // Inland homes: doors face the internal street network.
-      [3,37,8,6,5.5,Math.PI/2],[17,35,8,6,6,0],[32,32,8,7,6,Math.PI],[48,29,9,7,6,Math.PI],
-      [64,49,8,6,6,-Math.PI/2],[2,71,8,7,6,Math.PI/2],[18,82,9,7,6,Math.PI],[37,84,8,6,6,Math.PI],
-      [56,80,9,7,6,Math.PI],[70,69,8,6,6,-Math.PI/2],[17,22,8,6,5.5,0],[34,19,8,6,6,0],
-      [52,18,8,6,6,Math.PI],[3,24,8,6,6,Math.PI/2],[69,32,8,6,6,-Math.PI/2],[75,58,8,6,6,-Math.PI/2],
-      // Seafront homes: doors face the beach (+Z) and sit directly on the promenade.
-      [4,94,9,7,6,0],[20,96,9,7,6,0],[36,95,9,7,6,0],[52,93,9,7,6,0],[68,90,9,7,6,0],[80,86,9,7,6,0]
+      // Inland houses: doors face roads/alleys, not the sea.
+      [5,42,8,6,5.5,Math.PI/2],[20,40,8,6,6,0],[35,39,8,7,6,Math.PI],[50,37,9,7,6,Math.PI],
+      [68,53,8,6,6,-Math.PI/2],[5,76,8,7,6,Math.PI/2],[21,86,9,7,6,Math.PI],[40,87,8,6,6,Math.PI],
+      [59,84,9,7,6,Math.PI],[73,73,8,6,6,-Math.PI/2],[17,33,8,6,5.5,0],[35,32,8,6,6,0],
+      [53,31,8,6,6,Math.PI],[5,34,8,6,6,Math.PI/2],[71,40,8,6,6,-Math.PI/2],[78,62,8,6,6,-Math.PI/2],
+      // Seafront row: local +Z faces the beach/promenade.
+      [5,96,9,7,6,0],[21,98,9,7,6,0],[37,97,9,7,6,0],[53,95,9,7,6,0],[69,92,9,7,6,0],[82,88,9,7,6,0]
     ];
     vacant.forEach((v,i)=>houses.push(buildHouse(root,{id:"vacant-"+(i+1),label:"VACANT",x:v[0],z:v[1],w:v[2],d:v[3],h:v[4],r:v[5],labelScale:0.42})));
 
-    // Trail exit clearing: right of Olympus, after the full back-side/right-flank descent.
-    block(root,"#8f8a66",54,0.12,-8,32,0.24,22);
-    for(const [x,z] of [[43,-16],[45,1],[60,-16],[66,0]]){
+    // Right-side trail exit: open nature first, Chora later.
+    block(root,"#918a64",48,0.12,17,34,0.24,22);
+    for(const [x,z] of [[37,10],[40,24],[53,9],[60,23]]){
       block(root,"#5e4b34",x,1,z,0.45,2,0.45);
       block(root,"#617f3e",x,2.4,z,2.8,1.9,2.4);
     }
-    block(root,"#8d6d43",55,1.7,-8,0.45,3.4,0.45);
-    block(root,"#8d6d43",59,2.4,-8,8,0.35,0.7);
-    sign(root,"CHORA",59,2.72,-7.6,0.62,"#f3e3a0");
+    // Direction sign at the end of the mountain route.
+    block(root,"#8d6d43",47,1.7,18,0.45,3.4,0.45);
+    block(root,"#8d6d43",51,2.4,18,8,0.35,0.7);
+    sign(root,"CHORA",51,2.72,18.4,0.62,"#f3e3a0");
 
     // Chora lanes: dark island-stone paving with pale joints, tighter and more irregular than the open island roads.
-    const townLanes=[[28,54,82,4],[30,42,4,52],[8,62,4,46],[47,72,56,4],[30,28,76,4],[60,48,4,46],[16,79,46,4]];
+    const townLanes=[[32,61,86,4],[34,49,4,50],[10,68,4,44],[50,78,60,4],[34,39,78,4],[64,56,4,44],[20,85,50,4]];
     for(const [x,z,w,d] of townLanes){
       block(root,"#565453",x,0.075,z,w,0.15,d);
       const along=w>d;
@@ -517,22 +492,22 @@
       }
     }
     // Small courtyards / piazzette break the maze and give sight-lines back to the sea.
-    for(const [x,z] of [[22,53],[44,63],[9,44],[58,38],[29,77]]){
+    for(const [x,z] of [[24,60],[47,70],[11,52],[62,46],[33,83]]){
       block(root,"#686561",x,0.09,z,13,0.18,11);
       for(const q of [-4,0,4]) block(root,"#e9e3d8",x+q,0.19,z,0.14,0.04,11);
     }
 
     // Agora: an open civic/commercial square within Chora, with reused marble and a little fountain.
-    block(root,"#625f5b",39,0.11,58,22,0.22,18);
-    for(const x of [30,34,38,42,46,48]) block(root,"#e8e1d4",x,0.24,58,0.14,0.05,18);
-    block(root,"#d9cfbe",39,0.55,58,7.5,1.1,7.5);
-    block(root,"#49a8c8",39,1.12,58,5.5,0.12,5.5,0.25);
-    block(root,"#eee7dc",39,2.0,58,0.7,2.6,0.7);
-    for(const x of [31,47]) {
-      block(root,"#ece5da",x,1.8,66,0.65,3.6,0.65);
-      block(root,"#ddd2c1",x,3.7,66,1.6,0.28,1.6);
+    block(root,"#625f5b",43,0.11,65,22,0.22,18);
+    for(const x of [34,38,42,46,50,54]) block(root,"#e8e1d4",x,0.24,65,0.14,0.05,18);
+    block(root,"#d9cfbe",43,0.55,65,7.5,1.1,7.5);
+    block(root,"#49a8c8",43,1.12,65,5.5,0.12,5.5,0.25);
+    block(root,"#eee7dc",43,2.0,65,0.7,2.6,0.7);
+    for(const x of [35,51]) {
+      block(root,"#ece5da",x,1.8,73,0.65,3.6,0.65);
+      block(root,"#ddd2c1",x,3.7,73,1.6,0.28,1.6);
     }
-    sign(root,"AGORA",39,3.05,50.5,0.55,"#f2d88d");
+    sign(root,"AGORA",43,3.05,57.5,0.55,"#f2d88d");
 
     // Street life: cypress/olive shapes, pots, benches and splashes of bougainvillea.
     for(const [x,z,t] of [[13,47,0],[24,42,1],[34,50,0],[49,54,1],[61,61,0],[17,70,1],[41,75,0],[67,76,1]]){
@@ -544,6 +519,14 @@
       block(root,"#b8754b",x,0.32,z,0.65,0.64,0.65);
       block(root,"#c7438f",x,1.05,z,1.2,1.1,1.0);
     }
+    // Cycladic chapel/church landmark inside Chora.
+    const chapel=createNode({position:{x:52,y:0,z:78}}); addChild(root,chapel);
+    block(chapel,"#f7f3eb",0,2.8,0,8,5.6,7);
+    block(chapel,"#f7f3eb",0,5.9,-0.8,4.6,2.0,4.2);
+    block(chapel,"#2d6fa8",0,1.6,3.55,1.4,3.2,0.16);
+    block(chapel,"#2d6fa8",0,7.05,-0.8,2.0,0.55,2.0);
+    block(chapel,"#f2d88d",0,8.0,-0.8,0.18,1.5,0.18);
+
     // Seafront promenade stays on the beach side of every facade: harbor -> Noderunner -> Chora waterfront.
     // It deliberately runs several metres in front of the buildings so no house shares road footprint.
     const shoreRoad=[
@@ -577,8 +560,8 @@
     }
 
     // BIG BITCOIN's phrase belongs to its immediate side alley.
-    block(root,"#f1eee7",35,2.0,75.2,13,4,0.3);
-    sign(root,"Compliance Is Defiance",35,2.55,75.4,0.38,"#b51f2d");
+    block(root,"#f1eee7",39,2.0,82.2,13,4,0.3);
+    sign(root,"Compliance Is Defiance",39,2.55,82.4,0.38,"#b51f2d");
 
     // Waterfront taverna / beach-bar and Noderunner TV gathering spot.
     const tv=createNode({ position:{x:-11,y:0,z:96}, rotation:{x:0,y:0,z:0} }); addChild(root,tv);
