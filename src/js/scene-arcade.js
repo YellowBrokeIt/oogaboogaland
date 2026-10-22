@@ -16,7 +16,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { math, models, contributors, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
-  const AM = BL.arcadeModels, AG = BL.arcadeGames;
+  // The games' rules and the hall's sound are deferred on a hosted page and arrive in `prepare`.
+  const AM = BL.arcadeModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
   const { HALL, STAGE, MEZZ, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
@@ -75,14 +76,33 @@
   const ORDERS = ["Banana split! Ooga slurp slurp.", "Coconut milk, fresh from coconut. Ahh.", "Grub on stick. Ooga crunch!", "Lava pop. Hot hot hot. Good!"];
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let leaving = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
+  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let audio = null, bots = null, walkers = null, motes = null, power = null, disco = null, fame = null, shelf = null, lit = null;
   let ambientT = 0, wheelTick = 0, cheerT = 0, powerT = 99;
   // Who walked in, kept across a game so they come back out as themselves, and the ticket balance at the last visit,
   // so the wheel knows when to celebrate.
-  let lastPlayer = null, lastTickets = null;
+  let lastPlayer = null, lastTickets = null, unsubscribeAccount = null, remotes = null, footsteps = null;
+  const NO_ACTORS = [];
+  // An Ooga a signed-in player drives here is not also in the crowd or out strolling.
+  const hideCrowd = (name, on) => {
+    for (const list of [crowd, walkers]) if (list) for (const m of list) if (m.cave.traits.name === name) m.cave.root.visible = !on;
+  };
+  // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
+  // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
+  const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name, contributors.stateFor(cave.contributor) === "working");
+  const mayPick = (c) => !BL.net.mayDrive(c.name, contributors.stateFor(c) === "working");
+  const accountChanged = () => {
+    if (!avatar) return;
+    const released = BL.net.state.released;
+    const denied = mayPossess(avatar) || (released && released.name === avatar.traits.name ? "That Ooga is no longer yours to drive" : null);
+    BL.net.state.released = null;
+    if (denied && people.player === avatar) {
+      pilot.release(true);
+      hud.toast(denied);
+    }
+  };
   const targets = [];
 
   // A point in a frame stood at (x, z) turned by `turn`, into the hall: the transform every placed frame uses.
@@ -114,18 +134,19 @@
     return set.build();
   });
 
+  // Each way out holds only once the director has taken it: `go` refuses while another transition runs.
   const leaveCave = () => {
     if (leaving) return;
-    leaving = true;
-    go("hub");
+    leaving = go("hub");
   };
   // Into a game; a carnival machine names which of its kind (`place`), and the game comes back to it.
   const open = (id, place = null) => {
     if (leaving) return;
-    leaving = true;
-    go(id, place);
+    if (go(id, place)) leaving = openingGame = true;
   };
   const play = (i) => open(GAMES[i].id);
+  // The game's deferred code did not arrive: the visitor stays in the hall, and its cabinets and way out work again.
+  const stay = () => { leaving = openingGame = false; };
 
   // The line under each loop: the visitor's best in that game, or a call to play. A retro game's best is an arcade one.
   const bestOf = (id) => {
@@ -301,22 +322,22 @@
       return station;
     };
     const F = LAYOUT.frames;
-    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), AG.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
-    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), AG.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
-    machine(LAYOUT.shy, AM.coconutShy(), AG.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
+    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
+    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
+    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
     // The claws' blocks reach half-way to the posts either side of their bays, so the narrow gaps between the booths,
     // their scoreboards and the posts are closed rather than squeezed into. The air hockey table's scoreboards stand on
     // posts beyond its far end, wider than the table, and the pool tables' behind theirs: a block of their own.
-    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), AG.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
-    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, AG.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, AG.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
-    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, AG.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
-    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, AG.dartsGame, "darts", null, i, false));
+    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
+    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
+    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, BL.arcadeGames.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
+    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
+    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i, false));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the
     // rock to the columns' faces, so nobody walks into it and a walker sliding along the columns catches on none.
     const boardBox = boundsOf(AM.dartBoard());
     for (const p of F.darts) blocks.push([p.x + boardBox.min[0], p.x + boardBox.max[0], HALL.back, columnFace, ...FLOOR_FEET]);
-    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, AG.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
+    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
     // The doorway's token changer and ticket muncher (each in the way as far as it stands, the muncher shallower),
     // and the prize queue's ropes.
     LAYOUT.changers.forEach((p, i) => {
@@ -356,7 +377,7 @@
     // The prize counter by the doorway: the case of prizes, the sign and the ticket balance on a board.
     const pc = AM.prizeCounter(), prizes = framed(LAYOUT.prizes), prizeBody = createNode({ geometry: pc.body }), prizeLit = createNode({ geometry: pc.lit, sightHidden: true });
     addChild(prizes, prizeBody, createNode({ geometry: pc.glass, sightHidden: true }), prizeLit, signNode("Prizes", "banana", 1.8, 0, 4.1, -1));
-    ticketBoard = AG.scoreboard(prizes, "TICKETS", 5, "#ffb347", { x: 1.2, y: 2.55, z: 0.1 }, true);
+    ticketBoard = BL.arcadeGames.scoreboard(prizes, "TICKETS", 5, "#ffb347", { x: 1.2, y: 2.55, z: 0.1 }, true);
     ticketBoard.show(game.state.arcade.tickets);
     addChild(root, prizes);
     target(prizeBody, { kind: "prizes" }, 2.2);
@@ -409,7 +430,7 @@
       const base = pose === "sit" ? SEAT_Y : cave.root.position.y + feet;
       Object.assign(cave.root.position, { x, y: base, z });
       cave.root.rotation.y = facing;
-      if (pose === "sit") cave.parts.legL.rotation.x = cave.parts.legR.rotation.x = -1.45;
+      if (pose === "sit") cave.parts.legR.rotation.x = cave.parts.legL.rotation.x = -1.45;
       addChild(root, cave.root);
       crowd.push({ cave, pose, facing, t: i * 1.37, x, z, y: base, wave: 0, greet: 0, swing: 0, cheer: 0 });
       // Each is in the way as far as its hanging arms reach, a sitter by its stool's side of the table.
@@ -648,9 +669,9 @@
       r.position.x = w.x; r.position.z = w.z; r.position.y = w.base;
       const moving = w.pause <= 0, stride = moving ? Math.sin(elapsed * 7 + w.leg) * 0.55 : 0;
       r.rotation.y = Math.atan2((b[0] - a[0]) * w.dir, (b[1] - a[1]) * w.dir);
-      P.legL.rotation.x = stride; P.legR.rotation.x = -stride;
-      P.armL.rotation.x = -stride * 0.6;
-      P.armR.rotation.x = w.wave > 0 || w.cheer > 0 || cheerT > 0 ? -2.6 + Math.sin(elapsed * 12) * 0.3 : stride * 0.6;
+      P.legR.rotation.x = stride; P.legL.rotation.x = -stride;
+      P.armR.rotation.x = -stride * 0.6;
+      P.armL.rotation.x = w.wave > 0 || w.cheer > 0 || cheerT > 0 ? -2.6 + Math.sin(elapsed * 12) * 0.3 : stride * 0.6;
       w.wave = Math.max(0, w.wave - dt);
       w.cheer = Math.max(0, w.cheer - dt);
     }
@@ -829,6 +850,7 @@
   let canvasEl = null;
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
+    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
     if (e.key === "m" || e.key === "M") {
       toggleMute();
       return true;
@@ -838,12 +860,15 @@
       return true;
     }
     if (e.key === "Escape") {
-      leaveCave();
+      if (!pilot.escape()) leaveCave();
       return true;
     }
     return false;
   };
-  const onDonation = () => {};
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
   const onLootCleared = () => {};
 
   // Point lights, most important first so the lowest tier (ten) keeps them, warm lamp light first and the games'
@@ -996,17 +1021,17 @@
   // on its knuckles, whether it keeps to the deck, its jobs (one listed twice comes up twice as often), its greeting
   // for the visitor and its words with an Ooga.
   const ROLES = [
-    { id: "gamemaster", hat: 0, vest: 0, prop: 0, hand: "armL", upright: true, deck: false, start: "host", jobs: ["host", "host", "wheel", "fame", "welcome", "call", "call"],
+    { id: "gamemaster", hat: 0, vest: 0, prop: 0, hand: "armR", upright: true, deck: false, start: "host", jobs: ["host", "host", "wheel", "fame", "welcome", "call", "call"],
       hello: "Welcome, welcome! Step right up!", chat: ["You play good, Ooga!", "Big score coming. Me feel it!", "Spin wheel! Jackpot waiting!"] },
-    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armR", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher", "tokens", "tokens", "whistle"],
+    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher", "tokens", "tokens", "whistle"],
       hello: "Need tokens? Me got tokens!", chat: ["More tokens? Me got!", "No bite tokens, Ooga.", "Play fair. Have fun!"] },
-    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armR", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"],
+    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"],
       hello: "All machines fixed. Go play!", chat: ["Machine sound funny? Tell me.", "No kick machine, Ooga!", "Me fix. Me smart."] },
-    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armR", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"],
+    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"],
       hello: "Coconut? Fresh off tree!", chat: ["Thirsty? Coconut coming!", "Slurp slurp, good!", "Grub on stick later!"] },
-    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armR", upright: false, deck: false, start: "stock", jobs: ["stock", "stock", "claw", "tickets", "tickets", "muncher", "bucket"],
+    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: false, deck: false, start: "stock", jobs: ["stock", "stock", "claw", "tickets", "tickets", "muncher", "bucket"],
       hello: "Tickets buy prizes! Come see!", chat: ["Many tickets! Prize soon!", "Crown prize shiny. You want?", "Count tickets. Me count good."] },
-    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armR", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan", "rail"],
+    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan", "rail"],
       hello: "Hoo! Old games up here! Come play!", chat: ["Dust gone. Games shiny.", "Fire up here warm!", "Coconut Invaders! Me love."] }
   ];
   // Each job: the pose it is worked in, how long (s), whether the role's prop comes out, how often it speaks up and
@@ -1519,22 +1544,22 @@
     if (k > 0.001) {
       posture(g, i);
       const Z = POSE, pitch = a.chest.rotation.x = mix(a.chest.rotation.x, Z.pitch, k);
-      P.legL.rotation.x = mix(P.legL.rotation.x, Z.legs, k);
       P.legR.rotation.x = mix(P.legR.rotation.x, Z.legs, k);
+      P.legL.rotation.x = mix(P.legL.rotation.x, Z.legs, k);
       a.hips.position.y -= a.hips.position.y * (1 - Math.cos(Z.legs)) * k;
-      P.armL.rotation.x = mix(P.armL.rotation.x, -pitch - Z.lx, k);
-      P.armR.rotation.x = mix(P.armR.rotation.x, -pitch - Z.rx, k);
-      P.armL.rotation.z = mix(P.armL.rotation.z, Z.lz, k);
-      P.armR.rotation.z = mix(P.armR.rotation.z, Z.rz, k);
+      P.armR.rotation.x = mix(P.armR.rotation.x, -pitch - Z.lx, k);
+      P.armL.rotation.x = mix(P.armL.rotation.x, -pitch - Z.rx, k);
+      P.armR.rotation.z = mix(P.armR.rotation.z, Z.lz, k);
+      P.armL.rotation.z = mix(P.armL.rotation.z, Z.rz, k);
       P.head.rotation.x = mix(P.head.rotation.x, -pitch + Z.hx, k);
     }
-    P.armR.rotation.y = k > 0.001 ? POSE.ry * k : 0;
+    P.armL.rotation.y = k > 0.001 ? POSE.ry * k : 0;
     P.head.rotation.y = k > 0.001 ? POSE.hy * k : 0;
     const c = g.carry;
     if (c > 0.001) {
       const pitch = a.chest.rotation.x, tray = g.role.id === "runner";
       P[g.role.hand].rotation.x = mix(P[g.role.hand].rotation.x, -pitch - (tray ? 1.35 : 0.55), c);
-      if (tray) { P.armL.rotation.x = mix(P.armL.rotation.x, -pitch - 1.35, c); P.armL.rotation.z = mix(P.armL.rotation.z, 0.1, c); P.armR.rotation.z = mix(P.armR.rotation.z, -0.1, c); }
+      if (tray) { P.armR.rotation.x = mix(P.armR.rotation.x, -pitch - 1.35, c); P.armR.rotation.z = mix(P.armR.rotation.z, 0.1, c); P.armL.rotation.z = mix(P.armL.rotation.z, -0.1, c); }
     }
     if (g.prop) {
       const id = g.role.id, show = id === "gamemaster" || (id === "runner" ? g.carrying : g.phase === "work" && g.job.prop && g.blend > 0.5);
@@ -1637,7 +1662,7 @@
     };
     pilot = pilotMod.create({
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
@@ -1672,7 +1697,8 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction((action) => {
       if (action === "leave") leaveCave();
-      else if (action === "reset-view") pilot.goPreset("entrance");
+      else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-retake") pilot.modeAction(action);
       else if (action === "arcade-mute") toggleMute();
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 } });
@@ -1693,11 +1719,12 @@
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
     const wanted = named ? named.name : from >= 0 || machineFrom || retroFrom ? lastPlayer || world.pilot : world.pilot;
-    const playerName = wanted && contributors.roster.some((c) => c.name === wanted) ? wanted : contributors.activeRoster[0]?.name || null;
+    const wantedEntry = wanted && contributors.roster.find((c) => c.name === wanted);
+    const playerName = wantedEntry && mayPick(wantedEntry) ? wanted : contributors.activeRoster.find(mayPick)?.name || null;
     world.pilot = null;
     if (playerName) {
       playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: groundFor, walkable: walkableFor, useNear };
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, useNear };
       people = shared.crew = BL.crew.create(shared);
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
@@ -1706,6 +1733,7 @@
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       pilot.possess(avatar);
+      if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
       // Empty-handed, as in Ooga Mine: no rifle on the back, no aiming, and the mine's words for the controls.
       avatar.weapon.secondaryOwned = false;
       people.selectWeapon(0, avatar);
@@ -1714,7 +1742,12 @@
       hud.hint(COARSE ? "Stick walks · PLAY at a game" : "W A S D walk · mouse or Q E turn · Space plays what is next to you", 6000);
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;
+    unsubscribeAccount = BL.net.subscribe(accountChanged);
     seatCrowd(playerName);
+    // Other signed-in players in the hall, as the Oogas they drive (after the crowd, which they may stand in for).
+    remotes = BL.remotePlayers.create({ root, crew: people, hide: hideCrowd });
+    // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+    footsteps = BL.footsteps.create();
     hireCrew();
     hangFame(playerName);
     showShelf();
@@ -1745,7 +1778,7 @@
       if (won > 0) { back.flash = 3; fx.burst(back.x, 1.8, back.z, 30, SPARKS, 2.4); }
     }
     lightUp();
-    leaving = false;
+    leaving = openingGame = false;
     shownFrame = -1;
     prompt = null;
     orders = 0;
@@ -1765,45 +1798,45 @@
   const animateCrowd = (dt, elapsed) => {
     for (let i = 0; i < crowd.length; i++) {
       const m = crowd[i], P = m.cave.parts, t = (m.t += dt);
-      let armL = 0, armR = 0, head = 0, sway = 0;
+      let armR = 0, armL = 0, head = 0, sway = 0;
       if (m.pose === "claw" || m.pose === "pinball") {
-        armL = -1.05 + Math.sin(t * 8) * 0.07;
-        armR = m.pose === "pinball" ? -1.05 - Math.max(0, Math.sin(t * 6.5)) * 0.25 : -1.1 + Math.sin(t * 5 + 1) * 0.12;
+        armR = -1.05 + Math.sin(t * 8) * 0.07;
+        armL = m.pose === "pinball" ? -1.05 - Math.max(0, Math.sin(t * 6.5)) * 0.25 : -1.1 + Math.sin(t * 5 + 1) * 0.12;
         head = 0.25 + Math.sin(t * 1.3) * 0.05;
       } else if (m.pose === "hockey") {
-        armR = -0.85 + Math.sin(t * 4.6) * 0.3;
-        armL = -0.3;
+        armL = -0.85 + Math.sin(t * 4.6) * 0.3;
+        armR = -0.3;
         head = 0.35;
         sway = Math.sin(t * 2.3) * 0.2;
       } else if (m.pose === "skee") {
         // Swung by its game: back, then through to the release, when the machine takes its roll.
         const k = m.swing;
-        armR = k > 0.6 ? (1 - k) / 0.4 * 0.8 : k > 0 ? 0.8 - (0.6 - k) / 0.6 * 2.2 : -0.1;
-        armL = -0.3;
+        armL = k > 0.6 ? (1 - k) / 0.4 * 0.8 : k > 0 ? 0.8 - (0.6 - k) / 0.6 * 2.2 : -0.1;
+        armR = -0.3;
         head = 0.1;
       } else if (m.pose === "shoot") {
         const up = m.swing > 0 ? Math.sin(m.swing * Math.PI) : 0;
-        armL = armR = -0.6 - up * 2.1;
+        armR = armL = -0.6 - up * 2.1;
         head = -0.25 * up;
       } else if (m.pose === "sit") {
-        armR = -1.2 - Math.max(0, Math.sin(t * 1.8)) * 0.9;
-        armL = -0.9;
+        armL = -1.2 - Math.max(0, Math.sin(t * 1.8)) * 0.9;
+        armR = -0.9;
         head = 0.1 + Math.sin(t * 1.8) * 0.08;
       } else if (m.pose === "queue") {
         P.head.rotation.y = Math.sin(t * 0.6) * 0.5;
-        armL = armR = Math.sin(t * 1.1) * 0.1;
+        armR = armL = Math.sin(t * 1.1) * 0.1;
       } else {
         const up = Math.max(0, Math.sin(t * 1.6)) ** 3;
-        armL = armR = -2.8 * up;
+        armR = armL = -2.8 * up;
         head = -0.3;
       }
       m.swing = Math.max(0, m.swing - dt * 1.6);
       m.wave = Math.max(0, m.wave - dt);
       m.cheer = Math.max(0, m.cheer - dt);
-      if ((cheerT > 0 || m.cheer > 0) && m.pose !== "sit") armL = armR = -2.4 - Math.abs(Math.sin(t * 7)) * 0.4;
-      else if (m.wave > 0) armR = -2.6 + Math.sin(t * 12) * 0.3;
-      P.armL.rotation.x = armL;
+      if ((cheerT > 0 || m.cheer > 0) && m.pose !== "sit") armR = armL = -2.4 - Math.abs(Math.sin(t * 7)) * 0.4;
+      else if (m.wave > 0) armL = -2.6 + Math.sin(t * 12) * 0.3;
       P.armR.rotation.x = armR;
+      P.armL.rotation.x = armL;
       P.head.rotation.x = head;
       m.cave.root.rotation.y = m.facing + sway;
     }
@@ -1815,6 +1848,16 @@
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
+    const drivenHere = people && people.player;
+    BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
+    if (drivenHere) {
+      const p = drivenHere.root.position;
+      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y);
+      BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
+    }
+    remotes.update(dt);
+    footsteps.update(drivenHere);
     // The loop, then PRESS START blinking, then the loop again; the best line shows with the loop.
     const frame = Math.floor(elapsed * FPS) % (FRAMES + AM.START_FRAMES);
     if (frame !== shownFrame) {
@@ -1856,7 +1899,7 @@
     crewUpdate(dt);
     ambience(dt);
     audio.tick(dt);
-    if (avatar && !leaving) {
+    if (pilot.player && !leaving) {
       const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE);
       if (near !== prompt) {
         prompt = near;
@@ -1873,12 +1916,17 @@
     fx.update(dt, elapsed);
   };
   const TAP_SOUNDS = { door: "knock", changer: "coin", muncher: "spit", wheel: "click", disco: "ding", fame: "ding", off: "ding", sign: "grunt" };
-  const drawExtra = () => {};
+  const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
     // Whoever walked in goes on as themselves: into a game, or back out to the island at this mouth.
-    if (avatar) world.pilot = avatar.traits.name;
+    const traveller = pilot.player || openingGame && avatar;
+    world.pilotDetached = !traveller;
+    world.pilot = traveller ? traveller.traits.name : null;
+    unsubscribeAccount();
+    unsubscribeAccount = null;
+    BL.net.setBody(null);
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
     window.removeEventListener("keydown", armsKeys, true);
@@ -1890,6 +1938,10 @@
     // A spin still turning has its win saved but not shown: left out here, it shows on the way back in (`enter`).
     lastTickets = shownTickets();
     audio.dispose();
+    remotes.dispose();
+    remotes = null;
+    footsteps.dispose();
+    footsteps = null;
     if (people) people.dispose();
     fx.dispose();
     pilot.dispose();
@@ -1919,21 +1971,25 @@
     set.add(AM.coconut(0)).add(AM.coconut(1)).add(AM.pinLight(0)).add(AM.pinLight(1));
     if (staff) for (const g of staff) g.agent.liveGeometry(set);
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
+    if (remotes) remotes.liveGeometry(set);
   };
   const stats = () => {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}) };
   };
 
   const arcadeScene = {
-    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
+    voiceZone: "arcade.hall",
+    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return false;
     }
   };
+  arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
   BL.scenes.arcade = arcadeScene;
 })();

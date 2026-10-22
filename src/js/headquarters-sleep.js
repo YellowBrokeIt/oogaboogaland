@@ -11,6 +11,33 @@
   // The validated waypoint graph depends only on the island's architecture; later visits reuse it and map
   // fresh bed objects onto its nodes.
   const graphs = new WeakMap();
+  // Reserved sleeping rectangles on the rainforest terraces above the Mempool ramp.
+  // Sample the whole footprint, not just its centre, to reject channels, terrace
+  // edges and props. These are floor anchors, with no mattress or rendered items.
+  const outdoorBeds = (pool, clear = () => true) => {
+    const beds = [];
+    const L = pool.layout;
+    for (let along = 4; along <= 38; along += 3.6) {
+      const bearing = L.RAMP.start + along / L.RAMP.r, sr = Math.sin(bearing), cr = Math.cos(bearing);
+      for (const radius of [13.9, 16.2, 18.5]) {
+        const lx = sr * radius, lz = cr * radius, x = pool.worldX(lx, lz), z = pool.worldZ(lx, lz);
+        let low = Infinity, high = -Infinity;
+        for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
+          const y = L.groundAt(lx + sr * a + cr * b, lz + cr * a - sr * b);
+          low = Math.min(low, y); high = Math.max(high, y);
+        }
+        if (low < L.LEVEL.ground || high - low > 0.5 || !Number.isFinite(high)) continue;
+        let safe = true;
+        for (let a = -0.75; safe && a <= 0.75; a += 0.25) for (let b = -1.5; safe && b <= 1.5; b += 0.25) {
+          safe = clear(pool.worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), pool.place.y + high + 0.03,
+            pool.worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b));
+        }
+        if (safe) beds.push({ x, y: pool.place.y + high, z, outdoor: true, sleeper: null,
+          node: { rotation: { y: pool.place.ry + bearing + Math.PI / 2 } } });
+      }
+    }
+    return beds;
+  };
   const create = ({ island, beds, walkable = null, surfaceRoute = null }) => {
     const cached = graphs.get(island), reuse = !!cached && cached.bedIds.length === beds.length;
     const H = island.headquarters, points = reuse ? cached.points : [], edges = reuse ? cached.edges : [], bedNodes = new Map(), surface = [], exits = reuse ? cached.exits : [];
@@ -219,5 +246,5 @@
     };
     return { route, plan, clearSegment: segment, points, radius: RADIUS, height: HEIGHT, nodeCount: size, edgeCount: edges.reduce((sum, list) => sum + list.length, 0) / 2 };
   };
-  BL.headquartersSleep = { create };
+  BL.headquartersSleep = { create, outdoorBeds };
 })();

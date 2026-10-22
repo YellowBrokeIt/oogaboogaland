@@ -136,6 +136,43 @@
     }
     return geo;
   };
+  // Subtract a polygonal vertical bore from a flat mesh at build time. Retained fragments keep their face tags.
+  // The caller supplies a liner; this cuts the opening without adding a cap across it.
+  const cutCylinder = (geo, x, z, radius, minY = -Infinity, segments = 16) => {
+    const planes = [], kept = [], verts = geo.verts;
+    if (Number.isFinite(minY)) planes.push([0, -1, 0, minY]);
+    for (let k = 0; k < segments; k++) {
+      const a = (k + 0.5) / segments * Math.PI * 2, nx = Math.cos(a), nz = Math.sin(a);
+      planes.push([nx, 0, nz, -nx * x - nz * z - radius * Math.cos(Math.PI / segments)]);
+    }
+    for (const f of geo.faces) {
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, top = -Infinity;
+      for (const i of f.i) {
+        minX = Math.min(minX, verts[i * 3]); maxX = Math.max(maxX, verts[i * 3]);
+        minZ = Math.min(minZ, verts[i * 3 + 2]); maxZ = Math.max(maxZ, verts[i * 3 + 2]); top = Math.max(top, verts[i * 3 + 1]);
+      }
+      if (maxX <= x - radius || minX >= x + radius || maxZ <= z - radius || minZ >= z + radius || top < minY) { kept.push(f); continue; }
+      let inside = f.i.map(i => [verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]]);
+      for (const p of planes) {
+        const inner = [], outer = [];
+        for (let k = 0; k < inside.length; k++) {
+          const a = inside[k], b = inside[(k + 1) % inside.length];
+          const da = p[0] * a[0] + p[1] * a[1] + p[2] * a[2] + p[3], db = p[0] * b[0] + p[1] * b[1] + p[2] * b[2] + p[3];
+          if (da <= 0) inner.push(a);
+          if (da >= 0) outer.push(a);
+          if (da * db < 0) {
+            const t = da / (da - db), v = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+            inner.push(v); outer.push(v);
+          }
+        }
+        if (outer.length >= 3) kept.push({ ...f, i: outer.map(v => pushVert(geo, v[0], v[1], v[2])) });
+        inside = inner;
+        if (inside.length < 3) break;
+      }
+    }
+    geo.faces = kept;
+    return geo;
+  };
   const tube = ({ path, radius, rings = 8, segments = 6, colorFn, emissive = 0 } = {}) => {
     const geo = geometry();
     const ringIdx = [];
@@ -303,13 +340,39 @@
   const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(v)));
   const shade = (hex, k) => hexToRgb(hex).map((v) => clamp255(v * k));
   const mixRgb = (a, b, t) => a.map((v, i) => clamp255(v + (b[i] - v) * t));
+  // Builder caches remember which scenes used them. Leaving a scene drops the ones that only it used (`release`), so a
+  // visit's meshes are rebuilt on the next visit instead of staying resident for the page; renderer.releaseUnused
+  // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
+  const scopedCaches = new Set();
+  let cacheScope = null;
+  const track = (drop) => {
+    const entry = { scenes: new Set(), last: undefined, drop, use: () => {
+      if (entry.last === cacheScope) return;
+      entry.last = cacheScope;
+      if (cacheScope !== null) entry.scenes.add(cacheScope);
+      scopedCaches.add(entry);
+    } };
+    return entry;
+  };
+  const setScope = (id) => { cacheScope = id; };
+  const release = (id, keep) => {
+    for (const entry of scopedCaches) {
+      if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
+      entry.drop();
+      entry.scenes.clear();
+      entry.last = undefined;
+      scopedCaches.delete(entry);
+    }
+  };
   const cached = (build) => {
     let value = null;
-    return () => value || (value = build());
+    const entry = track(() => { value = null; });
+    return () => { entry.use(); return value || (value = build()); };
   };
   const variants = (build) => {
     const cache = [];
-    return (i = 0) => cache[i] || (cache[i] = build(i));
+    const entry = track(() => { cache.length = 0; });
+    return (i = 0) => { entry.use(); return cache[i] || (cache[i] = build(i)); };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -473,11 +536,8 @@
     const setAmmo = (ammo) => {
       if (ammo === shown) return;
       shown = ammo;
-      for (let i = 0; i < bananas.length; i++) {
-        const fill = Math.max(0, Math.min(1, (ammo - i * 3) / 3));
-        bananas[i].visible = fill > 0;
-        bananas[i].scale.y = 0.175 * fill;
-      }
+      const filled = Math.round(ammo / 3);
+      for (let i = 0; i < bananas.length; i++) bananas[i].visible = i < filled;
     };
     return { node, bananas, setAmmo };
   };
@@ -681,8 +741,9 @@
       return v;
     };
     const leg = (side) => createNode({ position: { x: side * 2.5 * u, y: 0, z: 0 }, geometry: vg(legVox(side), { x: -2 * u, y: -5 * u, z: -2.5 * u }) });
-    parts.legL = leg(-1);
-    parts.legR = leg(1);
+    // Facing +Z, local -X is anatomical right and +X is anatomical left.
+    parts.legR = leg(-1);
+    parts.legL = leg(1);
     const torsoVox = () => {
       const v = makeVox();
       if (traits.slim) {
@@ -733,12 +794,12 @@
       });
       const fingers = createNode({ position: { x: 0, y: -10 * u, z: 0 }, geometry: fingerGeometry, quaternion: BL.math.quat.create() });
       BL.math.quat.fromEuler(fingers.quaternion, 0, -side * Math.PI / 2, 0);
-      parts[side < 0 ? "fingersL" : "fingersR"] = fingers;
+      parts[side < 0 ? "fingersR" : "fingersL"] = fingers;
       addChild(node, fingers);
       return node;
     };
-    parts.armL = arm(-1);
-    parts.armR = arm(1);
+    parts.armR = arm(-1);
+    parts.armL = arm(1);
     // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
     // geometry, plus optional rest and carry angles.
     const club = dress.club ? dress.club(k) : {};
@@ -755,7 +816,7 @@
       rotation: { x: clubRest.x, y: 0, z: clubRest.z },
       geometry: skins.club.default
     });
-    addChild(parts.armL, parts.club);
+    addChild(parts.armR, parts.club);
     parts.snack = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.18 * h },
       scale: { x: BANANA_AMMO_SCALE, y: BANANA_AMMO_SCALE, z: BANANA_AMMO_SCALE },
@@ -763,7 +824,7 @@
       geometry: bananaGeometry(),
       visible: false
     });
-    addChild(parts.armR, parts.snack);
+    addChild(parts.armL, parts.snack);
     parts.gun = createNode({ quaternion: BL.math.quat.create(), visible: false });
     parts.gun.ammoReloading = false;
     parts.gunBody = createNode({ geometry: skins.gun.default });
@@ -865,7 +926,7 @@
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.hat, parts.face);
     if (dress.headgear) dress.headgear(k);
-    addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
+    addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
     // A second colourway bakes every voxel part still in use under the alternate
     // palette and pairs each geometry with its twin both ways, so swapping a
@@ -1544,5 +1605,5 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

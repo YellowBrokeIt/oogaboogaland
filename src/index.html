@@ -147,17 +147,19 @@
           <use href="#foliage" />
         </g>
       </svg>
-      <div class="curtain-label"><span class="curtain-spinner"></span><b><span data-sign>Ooga Booga Land</span></b><span id="curtain-saying">growing the island…</span></div>
+      <!-- Lettered ahead from hubModels.SIGN_GLYPHS (hud.js's signLettering), so the sign paints with the curtain. -->
+      <div class="curtain-label"><span class="curtain-spinner"></span><b><span aria-label="Ooga Booga Land"><svg viewBox="0 0 55 6" class="sign" aria-hidden="true"><path fill="currentColor" d="M0 0h.82v.82h-.82zM1 0h.82v.82h-.82zM2 0h.82v.82h-.82zM0 1h.82v.82h-.82zM2 1h.82v.82h-.82zM0 2h.82v.82h-.82zM2 2h.82v.82h-.82zM0 3h.82v.82h-.82zM2 3h.82v.82h-.82zM0 4h.82v.82h-.82zM1 4h.82v.82h-.82zM2 4h.82v.82h-.82zM4 1h.82v.82h-.82zM5 1h.82v.82h-.82zM6 1h.82v.82h-.82zM4 2h.82v.82h-.82zM6 2h.82v.82h-.82zM4 3h.82v.82h-.82zM6 3h.82v.82h-.82zM4 4h.82v.82h-.82zM5 4h.82v.82h-.82zM6 4h.82v.82h-.82zM8 1h.82v.82h-.82zM9 1h.82v.82h-.82zM10 1h.82v.82h-.82zM8 2h.82v.82h-.82zM10 2h.82v.82h-.82zM8 3h.82v.82h-.82zM9 3h.82v.82h-.82zM10 3h.82v.82h-.82zM10 4h.82v.82h-.82zM8 5h.82v.82h-.82zM9 5h.82v.82h-.82zM13 1h.82v.82h-.82zM12 2h.82v.82h-.82zM14 2h.82v.82h-.82zM12 3h.82v.82h-.82zM13 3h.82v.82h-.82zM14 3h.82v.82h-.82zM12 4h.82v.82h-.82zM14 4h.82v.82h-.82zM18 0h.82v.82h-.82zM19 0h.82v.82h-.82zM18 1h.82v.82h-.82zM20 1h.82v.82h-.82zM18 2h.82v.82h-.82zM19 2h.82v.82h-.82zM18 3h.82v.82h-.82zM20 3h.82v.82h-.82zM18 4h.82v.82h-.82zM19 4h.82v.82h-.82zM22 1h.82v.82h-.82zM23 1h.82v.82h-.82zM24 1h.82v.82h-.82zM22 2h.82v.82h-.82zM24 2h.82v.82h-.82zM22 3h.82v.82h-.82zM24 3h.82v.82h-.82zM22 4h.82v.82h-.82zM23 4h.82v.82h-.82zM24 4h.82v.82h-.82zM26 1h.82v.82h-.82zM27 1h.82v.82h-.82zM28 1h.82v.82h-.82zM26 2h.82v.82h-.82zM28 2h.82v.82h-.82zM26 3h.82v.82h-.82zM28 3h.82v.82h-.82zM26 4h.82v.82h-.82zM27 4h.82v.82h-.82zM28 4h.82v.82h-.82zM30 1h.82v.82h-.82zM31 1h.82v.82h-.82zM32 1h.82v.82h-.82zM30 2h.82v.82h-.82zM32 2h.82v.82h-.82zM30 3h.82v.82h-.82zM31 3h.82v.82h-.82zM32 3h.82v.82h-.82zM32 4h.82v.82h-.82zM30 5h.82v.82h-.82zM31 5h.82v.82h-.82zM35 1h.82v.82h-.82zM34 2h.82v.82h-.82zM36 2h.82v.82h-.82zM34 3h.82v.82h-.82zM35 3h.82v.82h-.82zM36 3h.82v.82h-.82zM34 4h.82v.82h-.82zM36 4h.82v.82h-.82zM40 0h.82v.82h-.82zM40 1h.82v.82h-.82zM40 2h.82v.82h-.82zM40 3h.82v.82h-.82zM40 4h.82v.82h-.82zM41 4h.82v.82h-.82zM42 4h.82v.82h-.82zM45 1h.82v.82h-.82zM44 2h.82v.82h-.82zM46 2h.82v.82h-.82zM44 3h.82v.82h-.82zM45 3h.82v.82h-.82zM46 3h.82v.82h-.82zM44 4h.82v.82h-.82zM46 4h.82v.82h-.82zM48 1h.82v.82h-.82zM49 1h.82v.82h-.82zM48 2h.82v.82h-.82zM50 2h.82v.82h-.82zM48 3h.82v.82h-.82zM50 3h.82v.82h-.82zM48 4h.82v.82h-.82zM50 4h.82v.82h-.82zM54 0h.82v.82h-.82zM54 1h.82v.82h-.82zM53 2h.82v.82h-.82zM54 2h.82v.82h-.82zM52 3h.82v.82h-.82zM54 3h.82v.82h-.82zM53 4h.82v.82h-.82zM54 4h.82v.82h-.82z"/></svg></span></b><span id="curtain-saying"></span></div>
     </div>
+    <script src="js/curtain.js" data-early></script>
 
     <header class="topbar">
       <div class="brand">
         <h1><a class="home-link" href="./" title="Back to the island"><span data-sign>Ooga Booga Land</span></a></h1>
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
-        <p data-scene="pool" hidden>Mempool cave</p>
         <p data-scene="factory" hidden>Lightning Factory</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
+        <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
         <p data-scene="arcade" hidden>Ooga Arcade</p>
         <p data-scene="skee" hidden>Ooga Arcade · Thro-ball</p>
         <p data-scene="hoops" hidden>Ooga Arcade · Hoop Shot</p>
@@ -177,7 +179,7 @@
         <p data-scene="dash" hidden>Ooga Arcade · Dino Dash</p>
         <p data-scene="stacker" hidden>Ooga Arcade · Stone Stacker</p>
       </div>
-      <time class="world-clock" id="world-clock" aria-label="Local time"></time>
+      <time class="world-clock" id="world-clock"></time>
       <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
         <span>Block</span><span id="world-block-height">&mdash;</span>
       </div>
@@ -194,13 +196,6 @@
         <button type="button" data-preset="bunks">Bunks</button>
         <button type="button" data-preset="bench">Bench</button>
         <button type="button" class="leave" data-action="leave" data-scene="lab" hidden>Leave<span> cave</span></button>
-      </nav>
-      <nav class="presets" aria-label="Mempool cave" data-scene="pool" hidden>
-        <button type="button" data-preset="ladder">Ladder</button>
-        <button type="button" data-preset="tiers">Tiers</button>
-        <button type="button" data-preset="chain">Chain</button>
-        <button type="button" data-preset="epoch">Epoch</button>
-        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Lightning Factory" data-scene="factory" hidden>
         <button type="button" data-preset="core">Core</button>
@@ -291,9 +286,12 @@
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="DSB Land" data-scene="dsb" hidden>
-        <button type="button" data-action="dsb-lookout">Turtle view</button>
-        <button type="button" data-action="reset-view">Walk</button>
+        <button type="button" data-action="dsb-lookout" title="Camera viewpoint · releases character control">Island overview</button>
         <button type="button" data-action="dsb-mute" id="dsb-mute" aria-pressed="false">Mute</button>
+      </nav>
+      <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
+        <span class="sphere-mode" id="sphere-mode" role="status"></span>
+        <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
         <button type="button" data-preset="core">Core</button>
@@ -321,68 +319,165 @@
     </header>
 
     <aside class="sheet" id="sheet" data-open="false">
-      <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas"
-        aria-label="Bananas and project metrics">
-        <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-          <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-          <path fill="#789a3b" d="M1 0h1v2H1z" />
-        </svg>
-      </button>
-      <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel">
-        <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
-          <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
-          <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
-          <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
-          <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
-        </svg>
-      </button>
-      <div class="tabs" role="tablist">
-        <button type="button" role="tab" data-tab="bananas" aria-selected="false"><span
-            data-sign>Bananas</span></button>
-        <button type="button" role="tab" data-tab="roster" aria-selected="true"><span data-sign>Ooga Boogas</span></button>
-        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden><span
-            data-sign>Loot</span> <span class="tab-count" id="loot-count" hidden></span></button>
-      </div>
-      <section class="panel" data-panel="roster" role="tabpanel">
-        <ul id="roster" class="roster"></ul>
-        <p class="help" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
+      <nav class="sheet-panels" role="tablist" aria-label="Island panels">
+        <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
+          data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
+          <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
+            <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
+            <path fill="#789a3b" d="M1 0h1v2H1z" />
+          </svg>
+        </button>
+        <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
+          aria-selected="true" aria-controls="roster-panel" aria-label="Ooga Boogas">
+          <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
+            <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
+            <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
+            <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
+            <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
+          </svg>
+        </button>
+        <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
+          aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
+          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
+            <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
+            <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
+            <path fill="#f3efe4" d="M4 4h1v2H4z" />
+          </svg><span class="tab-count" id="loot-count" hidden></span>
+        </button>
+        <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
+          aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
+          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 0h9v7H5v1H4v1H1V7H0z" />
+            <path fill="#f3efe4" d="M1 1h7v5H4v1H3v1H2V6H1z" />
+            <path fill="#5c4425" d="M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z" />
+          </svg>
+        </button>
+      </nav>
+      <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
+        <header class="panel-title">
+          <h2><span data-sign>Ooga Boogas</span></h2>
+          <span class="panel-chip" id="roster-count" data-tone="idle"></span>
+        </header>
+        <ul id="roster" class="roster slab" aria-label="Ooga Boogas"></ul>
+        <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
-      <section class="panel" data-panel="bananas" role="tabpanel" hidden>
-        <section class="meter" aria-label="Banana supply">
-          <span class="meter-label">Bananas</span>
-          <span class="meter-bar" role="progressbar" aria-label="Supply level" aria-valuemin="0" aria-valuemax="100"><span class="meter-fill"
-              id="meter-fill"></span></span>
-          <span class="meter-count" id="meter-count">0</span>
-          <span class="meter-forecast" id="meter-forecast"></span>
-        </section>
-        <div class="stats" aria-label="Your stats">
-          <div class="stat"><b id="stat-donations">0</b><span>donations</span></div>
-          <div class="stat"><b id="stat-sats">0</b><span>sats</span></div>
+      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
+        <header class="panel-title">
+          <h2><span data-sign>Bananas donated</span></h2>
+          <span class="panel-chip" id="banana-source" data-tone="idle">Demo</span>
+        </header>
+        <div class="slab banana-slab">
+          <section class="banana-total" aria-label="Current banana value of all sats donated">
+            <div class="banana-hero">
+              <svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+                <g id="banana-panel-glyph">
+                  <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
+                  <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
+                  <path fill="#789a3b" d="M1 0h1v2H1z" />
+                </g>
+              </svg>
+              <strong id="banana-total" title="All donated sats valued at the current BTCUSD price; 1 banana = $1">—</strong>
+              <span class="banana-hero-label">bananas · current value</span>
+            </div>
+            <dl class="banana-totals">
+              <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
+              <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
+            </dl>
+            <dl class="banana-rates" aria-label="Current Bitcoin and banana exchange rates">
+              <dt class="banana-rate-label" id="banana-rate-label" data-tone="wait">BTCUSD</dt>
+              <dd id="banana-btc-price">—</dd>
+              <dt class="banana-rate-label">1 banana = $1</dt>
+              <dd class="banana-exchange">
+                <svg class="banana-exchange-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>
+                <span>1</span><span id="banana-exchange">— sats</span>
+              </dd>
+            </dl>
+          </section>
+          <section class="banana-board" aria-labelledby="banana-board-title">
+            <div class="banana-board-head">
+              <h3 class="slab-head" id="banana-board-title"><span data-sign>Top donors</span></h3>
+              <div class="banana-units" role="group" aria-label="Rank donors by">
+                <button type="button" data-donor-unit="bananas" aria-pressed="true">Bananas</button>
+                <button type="button" data-donor-unit="sats" aria-pressed="false">Sats</button>
+              </div>
+            </div>
+            <div class="banana-board-labels" aria-hidden="true"><span>#</span><span>Donor</span><span id="banana-board-unit">Bananas</span></div>
+            <ol class="banana-leaders" id="banana-leaders" aria-label="Top donors by bananas"></ol>
+            <p class="banana-empty" id="banana-empty">No donations yet. Feed the first Ooga!</p>
+          </section>
+          <section class="banana-recent" aria-labelledby="banana-recent-title">
+            <h3 class="slab-head" id="banana-recent-title"><span data-sign>Most recent donations</span></h3>
+            <label class="banana-recent-filter"><input type="checkbox" id="banana-recent-bar"> <span id="banana-recent-bar-label">1,000 sats and up only</span></label>
+            <ol class="banana-recent-list" id="banana-recent-list" aria-label="Most recent donations"></ol>
+            <p class="banana-empty" id="banana-recent-empty">New donations will appear here.</p>
+          </section>
+          <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
-        <div class="stats metrics" id="project-metrics" aria-label="Project metrics">
-          <div class="stat"><b data-metric="commits">&ndash;</b><span>commits</span></div>
-          <div class="stat"><b data-metric="contributors">7</b><span>contributors</span></div>
-          <div class="stat"><b data-metric="issues">&ndash;</b><span>open issues</span></div>
-          <div class="stat"><b data-metric="stars">&ndash;</b><span>stars</span></div>
-        </div>
-        <p class="help">Live numbers come with the GitHub link.</p>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
-      <section class="panel" data-panel="loot" role="tabpanel" hidden>
-        <div class="panel-head">
+      <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
+        <header class="panel-title">
           <h2><span data-sign>Swag locker</span></h2>
           <button type="button" class="link" data-action="clear-loot">Clear</button>
-        </div>
+        </header>
         <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
         <ul id="inventory" class="loot"></ul>
       </section>
+      <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
+        <header class="panel-title">
+          <h2><span data-sign>Ooga Chat</span></h2>
+          <span class="panel-chip" id="chat-room" data-tone="idle">Offline</span>
+        </header>
+        <details class="chat-about">
+          <summary aria-label="About Ooga Chat" title="About Ooga Chat">?</summary>
+          <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
+        </details>
+        <div class="chat-identity" id="chat-identity" hidden>
+          <form class="chat-display-form" id="chat-display-form" autocomplete="off">
+            <label for="chat-display">Name</label>
+            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status chat-account-login">
+            <button type="submit" class="chat-display-save" id="chat-display-save">Save</button>
+          </form>
+          <span class="chat-account" title="Your GitHub account">signed in as <strong id="chat-account-login"></strong></span>
+          <p class="chat-display-status" id="chat-display-status" role="status" aria-live="polite"></p>
+        </div>
+        <ol class="chat-log slab" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
+        <p class="help chat-status" id="chat-status"><span id="chat-status-text"></span></p>
+        <span class="chat-announcement" id="chat-announcement" role="status" aria-live="polite" aria-atomic="true"></span>
+        <form class="chat-form" id="chat-form" autocomplete="off">
+          <span class="chat-field">
+            <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left chat-status-text" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
+            <span class="chat-left" id="chat-left" title="Characters left">160</span>
+          </span>
+          <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
+        </form>
+      </section>
       <footer class="sheet-foot">
-        <span class="quality" id="quality" aria-live="polite"></span>
-        <button type="button" class="link" data-action="reset">Reset demo</button>
+        <span class="account" id="account" hidden>
+          <span class="account-who">
+            <span class="account-name" id="account-name" hidden></span>
+          </span>
+          <span class="account-actions">
+            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla.">Contributor sign-in</button>
+            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
+            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
+            <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+          </span>
+        </span>
+        <span class="sheet-foot-meta">
+          <span class="account-room" id="account-room" hidden></span>
+          <span class="quality" id="quality" aria-live="polite"></span>
+          <button type="button" class="link" data-action="reset">Reset demo</button>
+        </span>
       </footer>
+      <div class="sheet-resize" id="sheet-resize" role="separator" tabindex="0" aria-label="Resize panel height"
+        aria-orientation="horizontal" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="520"
+        title="Drag to resize · Up grows · Down shrinks · double-click to reset"></div>
     </aside>
 
     <div id="weapon-reticle" class="weapon-reticle" aria-hidden="true" hidden>
@@ -395,16 +490,15 @@
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
-        aria-label="Ooga Booga Land destinations. Select a dot or press to cycle places" title="Ooga Booga Land destinations" hidden>
+        aria-labelledby="detached-destination-name destination-hud-label" title="Map · cycle destinations" hidden>
         <img class="freeroam-icon" id="freeroam-icon" alt="" aria-hidden="true">
-        <span class="detached-destinations" id="detached-destinations" aria-label="Places">
-          <span class="detached-dot" data-detached-preset="pile" title="Pile"></span>
-          <span class="detached-dot" data-detached-preset="lab" title="Lab"></span>
-          <span class="detached-dot" data-detached-preset="mirror" title="Mirror"></span>
-          <span class="detached-dot" data-detached-preset="underground" title="HQ"></span>
-          <span class="detached-dot" data-detached-preset="basement" title="Basement"></span>
-        </span>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
+        <span id="destination-hud-label" hidden>Map. Cycle destinations</span>
+      </button>
+      <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
+        aria-label="Return to your last character" title="Return to your last character" hidden>
+        <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
+        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25"><span id="own-ooga-health-fill"></span></span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -436,7 +530,8 @@
         </div>
       </button>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
-        aria-label="Ground smash" title="Ground smash (1)" hidden>
+        aria-label="Ground smash; hold for double damage" title="Ground smash · hold for double damage (1)" hidden>
+        <span class="weapon-toggle">
         <svg class="gorilla-action-icon" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">
           <path fill="#1d1a18" d="M2 9h8v16H2z" />
           <path fill="#393634" d="M3 11h6v12H3z" />
@@ -453,6 +548,13 @@
           <path fill="#403b36" d="M23 11h2v2h-2v1h-1v-2h1z" />
           <path fill="#24211e" d="M4 14h2v3H4zM6 19h3v2H6zM9 10h2v3H9z" />
         </svg>
+        </span>
+        <span class="equipment-compact primary-readout">
+          <span class="primary-strength" id="gorilla-strength" role="meter" aria-label="Ground smash power"
+            aria-valuemin="0" aria-valuemax="200" aria-valuenow="100" aria-valuetext="100% of normal smash damage">
+            <span class="primary-strength-fill" id="gorilla-strength-fill"></span>
+          </span>
+        </span>
       </button>
       <button type="button" class="primary-hud" id="primary-hud" data-action="weapon-primary" data-equipped="false" data-charging="false"
         aria-label="Equip primary melee weapon" aria-pressed="false" title="Equip primary melee weapon (1)" hidden>
@@ -585,8 +687,8 @@
         <div class="garage-head">
           <h2><span data-sign>Ooga Rally</span> <span class="garage-medal garage-cup" id="garage-cup" hidden></span>
           </h2>
-          <p class="help">Pick an Ooga, a ride and a track. Three laps against the crew, or all three tracks for the
-            Cup.</p>
+          <p class="help">Pick <span id="garage-pick-ooga">an Ooga, </span>a ride and a track. Three laps against the
+            crew, or all three tracks for the Cup.</p>
         </div>
         <div class="garage-columns">
           <div class="garage-col">
@@ -1265,7 +1367,7 @@
     </div>
     <button id="dsb-context" class="dsb-context" data-action="dsb-context" type="button" hidden>Use</button>
     <section id="dsb-panel" class="dsb-panel" data-scene="dsb" data-phase="entrance" aria-label="DSB Land" hidden>
-      <div class="dsb-intro"><p>DSB LAND</p><h2>Follow the light.</h2><button type="button" id="dsb-start-audio" data-action="dsb-start-audio">Enter with sound</button><p>Hold W or ↑ · on touch, push the left stick forward</p><p>The music gets closer with every step.</p><button type="button" data-action="dsb-mute">Mute sound</button><button type="button" data-action="leave">Back to island</button></div>
+      <div class="dsb-intro"><p>DSB LAND</p><h2>Follow the light.</h2><button type="button" id="dsb-start-audio" data-action="dsb-start-audio">Enter with sound</button><p>Hold W or ↑ · on touch, push the left stick forward</p><p>The music gets closer with every step.</p><button type="button" data-action="dsb-skip-entry">Skip</button><button type="button" data-action="dsb-mute">Mute sound</button><button type="button" data-action="leave">Back to ₿IFRÖST</button></div>
       <div class="dsb-arrival-card"><p>Welcome to DSB Land</p><button type="button" data-action="dsb-skip">Skip tour</button><p>Space / Enter to explore</p></div>
       <div class="dsb-world">
         <button type="button" class="dsb-toggle" id="dsb-toggle" data-action="dsb-panel" aria-expanded="false">Bag &amp; rides</button>
@@ -1290,6 +1392,7 @@
     </dialog>
     <dialog id="dsb-tv" aria-labelledby="dsb-tv-title">
       <header><div><p class="dsb-eyebrow">DSB LAND BROADCASTING</p><h2 id="dsb-tv-title">DSB TV</h2></div><button type="button" id="dsb-tv-close" autofocus>Close TV</button></header>
+      <nav class="dsb-tv-routes" aria-label="Noderunner interfaces"><button id="dsb-tv-main-route" type="button">DSB TV / Main</button><button id="dsb-tv-radio-route" type="button">Noderunners Radio</button><button id="dsb-tv-request-route" type="button">Jukebox / Request</button></nav>
       <div class="dsb-tv-glass">
         <nav aria-label="TV channels" id="dsb-tv-menu">
           <button type="button" id="dsb-tv-channel" aria-expanded="false" aria-controls="dsb-tv-radio">1. Noderunners Radio</button>
@@ -1297,6 +1400,7 @@
         </nav>
         <section id="dsb-tv-radio" hidden aria-label="Noderunners Radio">
           <button type="button" id="dsb-tv-back">Back to TV menu</button>
+          <button type="button" id="dsb-tv-play">Play / enable radio</button>
           <p id="dsb-tv-status" role="status">Connecting to the station</p>
           <p class="dsb-eyebrow">NOW PLAYING</p><h3 id="dsb-tv-song">Waiting for song info</h3><p id="dsb-tv-artist"></p><p id="dsb-tv-note"></p>
           <section class="dsb-tv-jukebox" aria-label="Request a song">
@@ -1304,6 +1408,7 @@
             <div class="dsb-tv-search"><input id="dsb-tv-query" maxlength="100" placeholder="Search Noderunners"><button id="dsb-tv-search" type="button">Search</button></div>
             <p id="dsb-tv-request-status" role="status"></p><div id="dsb-tv-results"></div>
             <section id="dsb-tv-invoice" hidden aria-label="Lightning payment">
+              <p>Invoice from Noderunners Radio. Scan or open your wallet to pay. No payment is made automatically.</p>
               <h3 id="dsb-tv-price"></h3><p id="dsb-tv-selected"></p><canvas id="dsb-tv-invoice-qr" role="img" aria-label="Lightning invoice QR code"></canvas>
               <a id="dsb-tv-wallet">Open Lightning wallet</a><button id="dsb-tv-copy" type="button">Copy invoice</button><button id="dsb-tv-cancel-invoice" type="button">Close invoice</button>
               <textarea id="dsb-tv-invoice-text" readonly aria-label="Lightning invoice"></textarea><p id="dsb-tv-payment-status" role="status"></p>
@@ -1311,78 +1416,85 @@
           </section>
           <div class="dsb-tv-columns"><div><h3>Up next</h3><ol id="dsb-tv-queue"></ol><h3>Recently played</h3><ol id="dsb-tv-history"></ol></div>
           <div class="dsb-tv-request"><canvas id="dsb-tv-qr" role="img" aria-label="Scan to open the official Noderunners jukebox"></canvas><a href="https://noderunnersradio.com/?jukebox" target="_blank" rel="noopener noreferrer">Choose a song on Noderunners &#8599;</a><p>Scan or open the jukebox, choose a song, then pay its Lightning invoice. The station sets the price and confirms your place in the queue.</p></div></div>
-          <p class="dsb-tv-help">Broadcast audio can lag behind song information. Music and Mute controls remain in Bag &amp; rides. Closing this TV keeps the radio playing.</p>
+          <p class="dsb-tv-help">Broadcast audio can lag behind song information. The existing DSB Mute control silences radio and ambience. Closing this TV keeps the outdoor radio playing and stops invoice monitoring. Close invoice stops monitoring only; it does not cancel a Lightning invoice. No payment is made automatically.</p>
         </section>
         <p id="dsb-tv-welcome">Choose a channel. The island is listening.</p>
       </div>
     </dialog>
     <div id="poker" data-scene="poker" hidden>
       <aside class="poker-panel fold-panel fold-right" id="poker-panel" aria-label="The Ember Den lobby">
-        <div class="panel-head"><h3>The Ember Den</h3><button class="panel-fold" type="button" data-fold="poker-panel" aria-label="Fold Ember Den lobby">−</button></div>
-        <p class="poker-tagline">THE UNDERGROUND BANANA CLUB</p>
-        <p>Ten stone tables. Nine seats each.<br>One very well-dressed dealer.</p>
-        <div class="poker-theme-picker">
-          <label>Cave theme <select data-poker-theme-select aria-label="Poker floor theme"></select></label>
-          <div class="poker-theme-choices" data-poker="theme-choices" aria-label="Choose a cave theme"></div>
-          <p data-poker="theme-description"></p>
+        <div class="panel-head"><div><p class="poker-kicker">THE UNDERGROUND BANANA CLUB</p><h3>The Ember Den</h3></div><button class="panel-fold" type="button" data-fold="poker-panel" aria-label="Fold Ember Den lobby">−</button></div>
+        <p class="poker-welcome">Good cards.<br><em>Great company.</em></p>
+        <p class="poker-tagline">Ten stone tables. Nine seats each.<br>Free chips. Suited gorillas. Stay a while.</p>
+        <div class="poker-mode-picker" aria-label="Choose how to play">
+          <button class="poker-primary" type="button" data-poker-action="quick"><span>Play a practice hand</span><small>Take a seat with computer opponents</small></button>
+          <button type="button" data-poker="connect" data-poker-action="connect"><span>Join live tables</span><small>Play with people · Ooga sign-in</small></button>
+          <button type="button" data-poker="practice" data-poker-action="practice" hidden>Back to practice</button>
+          <button type="button" data-poker="reconnect-floor" data-poker-action="reconnect" hidden>Reconnect to live tables</button>
         </div>
-        <button class="poker-primary poker-quick" type="button" data-poker-action="quick">Quick Play <small>Free chips · computer opponents</small></button>
-        <div class="poker-live-join"><label>Table name <input data-poker="nickname" maxlength="32" value="Ooga" autocomplete="off" aria-label="Your name at the poker table"></label><button type="button" data-poker="connect" data-poker-action="connect">Connect to live tables</button><button type="button" data-poker="practice" data-poker-action="practice" hidden>Back to local practice</button><small data-poker="live-label">Shared tables use an experimental verifiable shuffle.</small></div>
-        <div class="poker-lobby-head"><span>NO-LIMIT HOLD’EM</span><span>BLINDS 5 / 10</span></div>
+        <p class="poker-mode-note" data-poker="live-label">Practice is ready now. Live tables need a connected poker service.</p>
+        <button type="button" class="poker-return" data-poker="return" data-poker-action="return" hidden><span data-poker="return-label">Back to your table</span><small data-poker="floor-turn"></small></button>
+        <div class="poker-lobby-head"><h4>Find your table</h4><span data-poker="lobby-count">10 tables</span></div>
+        <div class="poker-filters" role="group" aria-label="Filter tables"><button type="button" data-poker-filter="all" aria-pressed="true">All tables</button><button type="button" data-poker-filter="open" aria-pressed="false">Open seats</button><button type="button" data-poker-filter="playing" aria-pressed="false">In play</button></div>
         <div class="poker-tables" data-poker="tables" aria-label="Ten poker tables"></div>
-        <p class="poker-notice" data-poker="floor-notice" role="status"></p>
-        <p class="poker-help" data-coarse="Walk with the sticks. Tap a table to watch.">WASD to walk · drag to look · click a table to watch</p>
-        <button type="button" data-poker-action="exit">Return through ₿IFRÖST mirror</button>
+        <p class="poker-empty-list" data-poker="empty-list" hidden>No tables match. Try All tables.</p>
+        <details class="poker-lobby-options"><summary>Room style &amp; connection options</summary>
+          <div class="poker-theme-picker"><label>Cave theme <select data-poker-theme-select aria-label="Poker floor theme"></select></label><div class="poker-theme-choices" data-poker="theme-choices" aria-label="Choose a cave theme"></div><p data-poker="theme-description"></p></div>
+          <label class="poker-nickname">Local service name <input data-poker="nickname" maxlength="32" value="Ooga" autocomplete="off"></label>
+          <p>Signed-in tables use your Ooga name. Recovery is saved on this device.</p>
+          <button type="button" data-poker="forget" data-poker-action="forget" hidden>Forget recovery on this device</button>
+        </details>
+        <p class="poker-notice" data-poker="floor-notice" role="status" aria-live="polite"></p>
+        <p class="poker-help" data-coarse="Move with the sticks. Tap a table to watch.">WASD to explore · click a table to watch</p>
+        <button class="poker-exit" type="button" data-poker-action="exit">Return to ₿IFRÖST</button>
       </aside>
-      <button class="panel-edge" type="button" data-fold="poker-panel">Poker tables</button>
+      <button class="panel-edge" type="button" data-fold="poker-panel">Tables</button>
       <section class="poker-focus" data-poker="focus" hidden aria-label="Poker table">
         <header class="poker-table-head">
-          <div><p class="poker-kicker" data-poker="theme-name">THE BANANA CLUB</p><h3 data-poker="title" tabindex="-1">Table 01</h3><p data-poker="status"></p></div>
-          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><button type="button" data-poker-action="walk">Walk the floor</button><button type="button" data-poker="pause" data-poker-action="pause" aria-pressed="false">Pause demo</button></div>
+          <div><p class="poker-kicker">THE EMBER DEN <span aria-hidden="true">/</span> <span data-poker="theme-name">THE BANANA CLUB</span></p><div class="poker-table-title"><h3 data-poker="title" tabindex="-1">Table 01</h3><span class="poker-mode-badge" data-poker="mode-badge">PRACTICE</span></div><p data-poker="status">No-limit Hold’em · blinds 5 / 10</p></div>
+          <div class="poker-table-tools"><span class="poker-free">FREE PLAY</span><label class="poker-table-switch">Table <select data-poker="table-select" aria-label="Watch another table"></select></label><button type="button" data-poker-action="walk">Walk the floor</button></div>
         </header>
-        <div class="poker-arena" aria-label="Nine-seat poker table">
-          <div class="poker-felt" aria-hidden="true"></div>
-          <div class="poker-center">
-            <div class="poker-dealer" aria-label="Suited gorilla dealer">
-              <svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/><path fill="#27332e" d="M17 20L22 10L32 4H48L58 10L63 20V41L53 51H27L17 41Z"/><path fill="#898b73" d="M23 20L32 17L40 21L48 17L57 20V32L60 38L52 46H28L20 38L23 32Z"/><path fill="#18251e" d="M25 23H36V28H25ZM44 23H55V28H44ZM34 31H46L48 36H32ZM30 40H50V42H30Z"/><path fill="#d9bc7b" d="M27 24H30V26H27ZM47 24H50V26H47Z"/></svg>
-              <span>GORILLA DEALER</span>
-            </div>
-            <p class="poker-pot"><span data-poker="pot-label">TOTAL POT</span><strong data-poker="pot">0</strong><small>banana chips</small></p>
-            <div class="poker-board" data-poker="board" aria-label="Community cards"></div>
-            <p class="poker-street" data-poker="street"></p>
-          </div>
-          <div class="poker-seats" aria-label="Player seats"></div>
-        </div>
-        <div class="poker-result" data-poker="result" role="status" hidden></div>
-        <div class="poker-dock">
-          <div class="poker-private"><div class="poker-hand" data-poker="hand" aria-label="Your private cards"></div><p data-poker="balance"></p><small data-poker="hand-name"></small></div>
-          <div class="poker-decision">
-            <p class="poker-turn" data-poker="turn" role="status"></p>
-            <div data-poker="controls" hidden>
-              <div class="poker-sizing">
-                <div class="poker-presets" aria-label="Bet size presets"><button type="button" data-poker-size="min">Min</button><button type="button" data-poker-size="half">½ pot</button><button type="button" data-poker-size="threeQuarter">¾ pot</button><button type="button" data-poker-size="pot">Pot</button><button type="button" data-poker-size="all">All in</button></div>
-                <label class="poker-amount"><span data-poker="range">Raise to</span><input data-poker="amount" type="number" inputmode="numeric" step="1" aria-label="Total bet for this betting round"></label>
-                <input data-poker="slider" type="range" step="1" aria-label="Choose a total bet size">
+        <div class="poker-status-strip"><span class="poker-connection" data-poker="connection">Practice · on your device</span><span data-poker="voice-label">Table voice</span><span class="poker-timer" data-poker="countdown" aria-label="Hand timing"></span><button type="button" data-poker="reconnect" data-poker-action="reconnect" hidden>Reconnect</button></div>
+        <div class="poker-table-layout">
+          <div class="poker-play">
+            <div class="poker-arena" aria-label="Nine-seat poker table">
+              <div class="poker-felt" aria-hidden="true"></div>
+              <div class="poker-center">
+                <div class="poker-dealer" aria-label="Suited gorilla dealer"><svg viewBox="0 0 80 80" aria-hidden="true"><path fill="#161f20" d="M6 78V62Q9 49 29 49H51Q71 49 74 62V78Z"/><path fill="#faf0d1" d="M28 49H52L44 78H36Z"/><path fill="#cda75d" d="M35 53L40 57L45 53L43 50H37ZM38 58H42L45 70L40 75L35 70Z"/><path fill="#394542" d="M27 49L15 60L26 62L23 67L36 78ZM53 49L65 60L54 62L57 67L44 78Z"/><path fill="#27332e" d="M17 20L22 10L32 4H48L58 10L63 20V41L53 51H27L17 41Z"/><path fill="#898b73" d="M23 20L32 17L40 21L48 17L57 20V32L60 38L52 46H28L20 38L23 32Z"/><path fill="#18251e" d="M25 23H36V28H25ZM44 23H55V28H44ZM34 31H46L48 36H32ZM30 40H50V42H30Z"/><path fill="#d9bc7b" d="M27 24H30V26H27ZM47 24H50V26H47Z"/></svg><span>THE HOUSE GORILLA</span></div>
+                <p class="poker-pot"><span data-poker="pot-label">TOTAL POT</span><strong data-poker="pot">0</strong><small>banana chips</small></p>
+                <div class="poker-board" data-poker="board" aria-label="Community cards"></div>
+                <p class="poker-street" data-poker="street"></p>
               </div>
-              <div class="poker-actions"><button type="button" data-poker-action="fold">Fold</button><button type="button" data-poker="call" data-poker-action="call">Check</button><button class="poker-primary" type="button" data-poker="raise" data-poker-action="raise">Raise to 20</button></div>
+              <div class="poker-seats" aria-label="Player seats"></div>
             </div>
-            <div class="poker-buttons" data-poker="setup">
-              <button class="poker-primary" type="button" data-poker="join" data-poker-action="join">Take a seat</button>
-              <button type="button" data-poker="bots" data-poker-action="bots">Add 3 bots</button>
-              <button type="button" data-poker="start" data-poker-action="start">Deal hand</button>
-              <button class="poker-primary" type="button" data-poker="refill" data-poker-action="refill" hidden>Free refill to 1,000</button>
+            <div class="poker-result" data-poker="result" role="status" hidden></div>
+            <div class="poker-dock">
+              <div class="poker-private"><span class="poker-private-label" data-poker="private-label">YOUR HAND</span><div class="poker-hand" data-poker="hand" aria-label="Your private cards"></div><p data-poker="balance"></p><small data-poker="hand-name"></small></div>
+              <div class="poker-decision">
+                <p class="poker-turn" data-poker="turn" role="status" aria-live="polite"></p><p class="poker-turn-help" data-poker="turn-help"></p>
+                <div data-poker="controls" role="group" aria-label="Betting actions" hidden>
+                  <div class="poker-actions"><button type="button" data-poker="fold" data-poker-action="fold">Fold</button><button type="button" data-poker="call" data-poker-action="call">Check</button><button class="poker-primary" type="button" data-poker="raise" data-poker-action="raise">Raise</button></div>
+                  <div class="poker-sizing"><div class="poker-presets" role="group" aria-label="Choose a bet size"><button type="button" data-poker-size="min">Min</button><button type="button" data-poker-size="half">½ pot</button><button type="button" data-poker-size="threeQuarter">¾ pot</button><button type="button" data-poker-size="pot">Pot</button><button type="button" data-poker-size="all">All in</button></div><label class="poker-amount"><span data-poker="range">Raise to</span><input data-poker="amount" type="number" min="0" step="1" inputmode="numeric" aria-describedby="poker-bet-help"></label><input data-poker="slider" type="range" min="0" max="1000" step="1" aria-label="Bet total for this round" aria-describedby="poker-bet-help"></div>
+                  <p class="poker-bet-help" id="poker-bet-help" data-poker="bet-help">Choose a size, then press Bet or Raise to send it.</p>
+                </div>
+                <div class="poker-setup" data-poker="setup"><div class="poker-buttons"><button class="poker-primary" type="button" data-poker="join" data-poker-action="join">Take a seat</button><button class="poker-primary" type="button" data-poker="start" data-poker-action="start">Deal hand</button><button type="button" data-poker="bots" data-poker-action="bots">Add 3 bots</button><button type="button" data-poker="refill" data-poker-action="refill" hidden>Get 1,000 free chips</button></div></div>
+                <p class="poker-notice" data-poker="notice" role="status" aria-live="polite"></p>
+              </div>
             </div>
-            <p class="poker-countdown" data-poker="countdown"></p>
           </div>
+          <aside class="poker-rail" aria-label="Table information and options">
+            <div class="poker-rail-title"><span class="poker-kicker">AT THE TABLE</span><span data-poker="seat-count">0 / 9</span></div>
+            <dl class="poker-table-facts"><div><dt>Blinds</dt><dd>5 / 10</dd></div><div><dt>Starting stack</dt><dd>1,000</dd></div><div><dt>Hand</dt><dd data-poker="hand-number">—</dd></div></dl>
+            <div class="poker-activity"><h4>This hand</h4><div class="poker-log" data-poker="log" aria-label="Public action history">Take a seat to get started.</div></div>
+            <div class="poker-table-footer">
+              <details open><summary>Table options</summary><div class="poker-preferences"><label><input type="checkbox" data-poker-option="auto" checked>Auto deal in practice</label><label><input type="checkbox" data-poker-option="sound">Table sounds</label></div><div class="poker-buttons"><button type="button" data-poker="pause" data-poker-action="pause" aria-pressed="false">Pause practice</button><button type="button" data-poker="stand" data-poker-action="stand" hidden>Leave seat</button></div></details>
+              <details><summary>Room style</summary><label class="poker-theme-inline">Cave theme <select data-poker-theme-select aria-label="Table theme"></select></label><p class="poker-theme-note" data-poker="theme-note"></p></details>
+              <details class="poker-history"><summary>Recent hands</summary><ol data-poker="history"></ol></details>
+              <details class="poker-fairness" data-poker="fairness" hidden><summary>Shuffle &amp; hand verification</summary><p data-poker="fair-status"></p><p class="poker-proof-root" data-poker="proof-root"></p><div class="poker-buttons"><button type="button" data-poker="verify" data-poker-action="verify">Verify hand</button><button type="button" data-poker="export" data-poker-action="export">Download record</button></div><label>Check a saved record <input type="file" data-poker="audit-file" accept=".json,application/json"></label><p>Experimental, unaudited protocol. Proof checks cannot rule out collusion, compromised devices or deliberate disconnections. Folded cards stay private.</p></details>
+              <details class="poker-rules"><summary>How to play</summary><p>Make the best five-card hand from your two private cards and the five community cards. Check when no bet is owed, call to match, raise to increase the bet, or fold to leave this hand.</p><p>The bet amount is your total for this round. Presets only choose an amount. All-ins create side pots; ties split pots. Banana chips are free, have no cash value and cannot be bought, transferred or redeemed. No rake.</p><p>Walk the floor keeps your seat. Return to the table to act. In practice, Leave seat during a hand checks or folds your remaining turns and releases the seat afterward. Live players must stay connected after folding and leave between hands.</p><p>Live contributions and betting turns have a 90-second deadline. If it expires, the hand cancels and committed chips return. Signed-in recovery works on the same browser and device: reconnect before the deadline. Anonymous local-service keys are lost on reload. Use Forget recovery after standing to remove saved keys.</p><p>Voice follows the table you watch. Walking returns to floor voice. Spectators can join table conversations; private cards remain hidden.</p></details>
+            </div>
+          </aside>
         </div>
-        <footer class="poker-table-footer">
-          <label class="poker-theme-inline">Cave theme <select data-poker-theme-select aria-label="Poker table theme"></select><span data-poker="theme-note">Ivory stone and emerald felt</span></label>
-          <div class="poker-preferences"><label><input type="checkbox" data-poker-option="auto" checked>Auto deal</label><label><input type="checkbox" data-poker-option="sound">Sound</label><button type="button" data-poker="stand" data-poker-action="stand" hidden>Stand / walk</button></div>
-          <p class="poker-notice" data-poker="notice" role="status"></p>
-          <details class="poker-fairness" data-poker="fairness" hidden><summary>Shuffle &amp; hand verification</summary><p data-poker="fair-status" role="status">Waiting for a shared hand.</p><p class="poker-proof-root" data-poker="proof-root"></p><div class="poker-buttons"><button type="button" data-poker="verify" data-poker-action="verify">Verify hand</button><button type="button" data-poker="export" data-poker-action="export">Download hand record</button></div><label>Check a saved record <input type="file" data-poker="audit-file" accept=".json,application/json"></label><p>Experimental protocol. Your browser checks the encrypted shuffle and allowed card openings. Folded cards are not published. Verification cannot rule out collusion, compromised devices or deliberate disconnections.</p></details>
-          <details class="poker-history"><summary>Hand history &amp; action log</summary><p class="poker-log" data-poker="log"></p><ol data-poker="history"></ol></details>
-          <details class="poker-rules"><summary>Rules &amp; shuffle</summary><p>No-limit Texas Hold’em · blinds 5/10 · 1,000 free banana chips · no rake. Raise sizes are your total for this betting round. All-ins create side pots; ties split pots. A sizing preset only fills the input; press Bet or Raise to submit.</p><p>Session-only chips have no cash value, purchase, transfer or redemption. They are separate from donation bananas. Local practice has computer opponents, optional auto deal and no turn deadline.</p><p>Live tables have human players and an experimental encrypted shuffle checked by every browser. Stay connected through the hand, even after folding. If a required contribution or action does not arrive within 90 seconds of the last table event, the hand cancels and all committed chips return. Reloading loses your private session keys. Stand between hands before leaving the room.</p><p>Local practice uses Web Crypto and Fisher–Yates; its hands have no independent proof. Spectators see community and public showdown cards only.</p></details>
-        </footer>
       </section>
       <section class="race-results game-intro" data-intro="poker" hidden aria-label="Welcome to The Ember Den">
         <p class="game-intro-kicker">The underground banana club</p>
@@ -1401,24 +1513,22 @@
         <button type="button" data-action="leave">Exit Game</button>
       </section>
     </div>
-    <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
+    <dialog class="modal donation-popup" id="donation-popup" aria-labelledby="donation-title">
       <div class="panel-head">
-        <h2><span data-sign>Feed the Ooga Boogas</span></h2>
-        <button type="button" class="modal-close" data-action="feed-close" aria-label="Close the feed">&times;</button>
+        <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
+        <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
       </div>
-      <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
-      <p class="qr-url" id="qr-url"></p>
-      <label class="field"><span>Your handle</span><input id="handle" type="text" maxlength="24" autocomplete="off"
-          spellcheck="false" placeholder="anon" autofocus></label>
-      <label class="field"><span>Banana message</span><input id="message" type="text" maxlength="80" autocomplete="off"
-          placeholder="shown when your banana is eaten"></label>
-      <div class="actions">
-        <button type="button" data-action="tip">Tip 1.2K sats</button>
-        <button type="button" data-action="tip-legendary">Tip 120K sats</button>
+      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message. In the name field, the arrow shows previous names; Down Arrow previews a suggestion, Tab or Enter accepts it, and Escape cancels it. O for on-chain, C to copy, and Escape to go back."></canvas>
+      <div id="donation-fields">
+        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
+        <label class="field"><span id="donation-message-label">Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
+        <div class="donation-details-actions">
+          <span id="donation-details-status" role="status"></span>
+        </div>
       </div>
-      <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and
-          100K sats.</span></p>
+      <p class="help">Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.</p>
     </dialog>
+    <div id="factory-donation-fields" hidden></div>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">
         <h2><span data-sign>Add an Ooga</span></h2>
@@ -1505,6 +1615,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <div class="hint" id="hint" hidden></div>
       </div>
     </div>
+    <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
     <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
@@ -1525,6 +1636,27 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   </main>
 
   <script src="js/qr.js"></script>
+  <section id="rulers-catalog" class="rulers-catalog" role="dialog" aria-modal="true" aria-labelledby="rulers-title" hidden>
+    <header><div><p class="rulers-eyebrow">ART · APPAREL · IDEAS</p><h2 id="rulers-title">WITHOUT RULERS <span aria-hidden="true">■</span></h2></div><button type="button" data-wr="close">Return to shop</button></header>
+    <p class="rulers-privacy">No customer info stored here. Browse here; purchases are handled on the official site.</p>
+    <nav aria-label="Shop categories"></nav>
+    <div class="rulers-browse"><div class="rulers-bar"><button type="button" data-wr="back" hidden>← Back</button><h3 class="rulers-heading">Featured apparel &amp; art</h3></div><label class="rulers-search">Search catalog<input type="search" maxlength="120" autocomplete="off" placeholder="Search this curated catalog"></label><div class="rulers-results"></div></div>
+    <footer><p class="rulers-status" role="status"></p><a href="https://www.without-rulers.com/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open on without-rulers.com ↗</a></footer>
+  </section>
+  <section id="ink-catalog" class="ink-catalog" role="dialog" aria-modal="true" aria-labelledby="ink-title" hidden>
+    <header><div><p class="ink-eyebrow">ART / PRINT / COMMUNITY</p><h2 id="ink-title">PROOF OF INK <span aria-hidden="true">◆</span></h2></div><button type="button" data-ink="close">Return to studio</button></header>
+    <p class="ink-privacy">Browse here. Purchase on ProofOfInk.com. No customer data stored in OogaBoogaLand.</p>
+    <nav aria-label="Catalog sections"></nav>
+    <div class="ink-browse"><div class="ink-bar"><button type="button" data-ink="back" hidden>← Back</button><h3 class="ink-heading">Featured</h3></div><label class="ink-search">Search this selection<input type="search" maxlength="120" autocomplete="off" placeholder="Art, apparel, artists, collections…"></label><div class="ink-filters" aria-label="Categories"></div><div class="ink-results"></div></div>
+    <footer><p class="ink-status" role="status"></p><a href="https://proofofink.com/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open Proof of Ink ↗</a></footer>
+  </section>
+  <section id="big-terminal" class="big-terminal" role="dialog" aria-modal="true" aria-labelledby="big-title" hidden>
+    <header><div><p class="big-eyebrow">PUBLIC INFORMATION / PODCONF</p><h2 id="big-title">BIG BITCOIN</h2></div><button type="button" data-big="close">Return to HQ</button></header>
+    <p class="big-privacy">Discover here. Visit PODCONF.xyz for current information. No customer data stored here.</p>
+    <nav aria-label="Information sections"></nav>
+    <div class="big-results"></div>
+    <footer>Curated from the official homepage · checked 4 October 2026. The headquarters is in-world satire; market screens are decorative.</footer>
+  </section>
   <script src="js/math.js"></script>
   <script src="js/daylight.js"></script>
   <script src="js/scene.js"></script>
@@ -1532,17 +1664,22 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/mirror-body.js"></script>
   <script src="js/mirror-damage.js"></script>
   <script src="js/character-visibility.js"></script>
+  <script src="js/dsb-water.js"></script>
   <script src="js/gl-renderer.js"></script>
   <script src="js/canvas-renderer.js"></script>
   <script src="js/models.js"></script>
+  <script src="js/banana-icon.js"></script>
   <script src="js/convex.js"></script>
   <script src="js/terrain.js"></script>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
   <script src="js/hub-models.js"></script>
   <script src="js/dressing.js"></script>
+  <script src="js/dressing-mediterranean.js"></script>
   <script src="js/chalkboard.js"></script>
   <script src="js/lifehash.js"></script>
+  <script src="js/contributor-identities.js"></script>
+  <script src="js/activity-repos.js"></script>
   <script src="js/jumbotron-data.js"></script>
   <script src="js/jumbotron.js"></script>
   <script src="js/headquarters-models.js"></script>
@@ -1559,8 +1696,10 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/characters.gen.js"></script>
   <script src="js/contributors.js"></script>
   <script src="js/donations.js"></script>
+  <script src="js/donation-rate.js"></script>
   <script src="js/mempool.js"></script>
   <script src="js/oogatron-live.js"></script>
+  <script src="js/totem-feed.js"></script>
     <script src="js/chain.js"></script>
   <script src="js/weapon-targets.js"></script>
   <script src="js/interact.js"></script>
@@ -1571,6 +1710,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/mine-rigs.js"></script>
   <script src="js/game.js"></script>
   <script src="js/hud.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/chat.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>
   <script src="js/crew.js"></script>
@@ -1586,34 +1728,46 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/drop-models.js"></script>
   <script src="js/rocket.js"></script>
   <script src="js/rocket-models.js"></script>
-    <script src="js/pool-models.js"></script>
+  <script src="js/pool-layout.js"></script>
+  <script src="js/pool-models.js"></script>
+  <script src="js/pool-water.js"></script>
+  <script src="js/pool-paintings.js"></script>
   <script src="js/pool-wildlife.js"></script>
+  <script src="js/timechain-rooms.js"></script>
+  <script src="js/deferred.js"></script>
   <script src="js/timechain-models.js"></script>
-  <script src="js/timechain-beer.js"></script>
-  <script src="js/timechain-data.js"></script>
-  <script src="js/timechain-boards.js"></script>
+  <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
+  <script src="js/remote-players.js"></script>
+  <script src="js/npc-sync.js"></script>
+  <script src="js/footsteps.js"></script>
   <script src="js/ooga-portal-models.js"></script>
   <script src="js/ooga-portal.js"></script>
   <script src="js/lab-phase.js"></script>
   <script src="js/wall-panels.js"></script>
+  <script src="js/clanker-rage.js"></script>
   <script src="js/clankers.js"></script>
   <script src="js/clanker-play.js"></script>
+  <script src="js/bca-models.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
-    <script src="js/scene-pool.js"></script>
   <script src="js/factory-feed.js"></script>
   <script src="js/factory-mock.js"></script>
+  <script src="js/factory-kiosk.js"></script>
+  <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-window.js"></script>
+  <script src="js/tess.js"></script>
+  <script src="js/hub-guide.js"></script>
+  <script src="js/factory-greeter.js"></script>
   <script src="js/scene-factory.js"></script>
   <script src="js/arcade-models.js"></script>
-  <script src="js/arcade-games.js"></script>
-  <script src="js/retro-games.js"></script>
+  <script src="js/arcade-games.js" data-defer="arcade"></script>
+  <script src="js/retro-games.js" data-defer="arcade"></script>
   <script src="js/scene-arcade.js"></script>
-  <script src="js/carnival-audio.js"></script>
+  <script src="js/carnival-audio.js" data-defer="arcade"></script>
   <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>
   <script src="js/racers.js"></script>
@@ -1621,9 +1775,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/race-hud.js"></script>
   <script src="js/race-audio.js"></script>
   <script src="js/scene-race.js"></script>
-  <script src="js/skydiver.js"></script>
+  <script src="js/skydiver.js" data-defer="drop"></script>
   <script src="js/drop-hud.js"></script>
-  <script src="js/drop-audio.js"></script>
+  <script src="js/drop-audio.js" data-defer="drop"></script>
   <script src="js/scene-drop.js"></script>
   <script src="js/mine-models.js"></script>
   <script src="js/mine-sim.js"></script>
@@ -1634,30 +1788,90 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/rocket-hud.js"></script>
   <script src="js/rocket-audio.js"></script>
   <script src="js/scene-orbit.js"></script>
-  <script src="js/dsb-models.js"></script>
-  <script src="js/dsb-data.js"></script>
+  <script src="js/dsb-coast.js" data-defer="dsb"></script>
+  <script src="js/dsb-geography.js" data-defer="dsb"></script>
+  <script src="js/dsb-models.js" data-defer="dsb"></script>
+  <script src="js/dsb-data.js" data-defer="dsb"></script>
   <script src="js/dsb-audio-data.js"></script>
-  <script src="js/dsb-audio.js"></script>
-  <script src="js/dsb-tv.js"></script>
-  <script src="js/dsb-agent-remote.js"></script>
-  <script src="js/dsb-conversation.js"></script>
-  <script src="js/dsb-agent-brain.js"></script>
-  <script src="js/dsb-agent.js"></script>
+  <script src="js/dsb-audio.js" data-defer="dsb"></script>
+  <script src="js/dsb-menu-shell.js" data-defer="dsb"></script>
+  <script src="js/dsb-menu-zones.js" data-defer="dsb"></script>
+  <script src="js/dsb-tv.js" data-defer="dsb"></script>
+  <script src="js/dsb-agent-remote.js" data-defer="dsb"></script>
+  <script src="js/dsb-conversation.js" data-defer="dsb"></script>
+  <script src="js/dsb-agent-brain.js" data-defer="dsb"></script>
+  <script src="js/dsb-agent.js" data-defer="dsb"></script>
+  <script src="js/dsb-weather.js" data-defer="dsb"></script>
+  <script src="js/dsb-nature.js" data-defer="dsb"></script>
+  <script src="js/dressing-chora.js" data-defer="dsb"></script>
+  <script src="js/dressing-coastal.js" data-defer="dsb"></script>
+  <script src="js/dsb-exterior.js" data-defer="dsb"></script>
+  <script src="js/dsb-enrichment.js" data-defer="dsb"></script>
+  <script src="js/dsb-town.js" data-defer="dsb"></script>
+  <script src="js/dsb-atmosphere.js" data-defer="dsb"></script>
+  <script src="js/dsb-entrance.js" data-defer="dsb"></script>
+  <script src="js/dsb-olympus.js" data-defer="dsb"></script>
+  <script src="js/dsb-vacancies.js" data-defer="dsb"></script>
+  <script src="js/dsb-water-interaction.js" data-defer="dsb"></script>
+  <script src="js/dsb-interior-audio.js" data-defer="dsb"></script>
+  <script src="js/dsb-studio.js" data-defer="dsb"></script>
+  <script src="js/maxis-models.js" data-defer="dsb"></script>
+  <script src="js/maxis-club.js" data-defer="dsb"></script>
+  <script src="js/without-rulers-models.js" data-defer="dsb"></script>
+  <script src="js/without-rulers-shop.js" data-defer="dsb"></script>
+  <script src="js/without-rulers-data.js" data-defer="dsb"></script>
+  <script src="js/without-rulers-menu.js" data-defer="dsb"></script>
+  <script src="js/proof-of-ink-data.js" data-defer="dsb"></script>
+  <script src="js/proof-of-ink-art.js" data-defer="dsb"></script>
+  <script src="js/proof-of-ink-models.js" data-defer="dsb"></script>
+  <script src="js/proof-of-ink-room.js" data-defer="dsb"></script>
+  <script src="js/proof-of-ink-menu.js" data-defer="dsb"></script>
+  <script src="js/big-bitcoin-data.js" data-defer="dsb"></script>
+  <script src="js/big-bitcoin-models.js" data-defer="dsb"></script>
+  <script src="js/big-bitcoin-room.js" data-defer="dsb"></script>
+  <script src="js/big-bitcoin-menu.js" data-defer="dsb"></script>
+  <script src="js/meme-factory-data.js" data-defer="dsb"></script>
+  <script src="js/meme-factory-models.js" data-defer="dsb"></script>
+  <script src="js/meme-factory-room.js" data-defer="dsb"></script>
+  <script src="js/meme-factory-menu.js" data-defer="dsb"></script>
+  <script src="js/stackchain-data.js" data-defer="dsb"></script>
+  <script src="js/stackchain-art.js" data-defer="dsb"></script>
+  <script src="js/stackchain-models.js" data-defer="dsb"></script>
+  <script src="js/stackchain-zones.js" data-defer="dsb"></script>
+  <script src="js/stackchain-room.js" data-defer="dsb"></script>
+  <script src="js/stackchain-menu.js" data-defer="dsb"></script>
+  <script src="js/svrn-data.js" data-defer="dsb"></script>
+  <script src="js/svrn-models.js" data-defer="dsb"></script>
+  <script src="js/svrn-room.js" data-defer="dsb"></script>
+  <script src="js/svrn-menu.js" data-defer="dsb"></script>
+  <script src="js/dsb-interiors.js" data-defer="dsb"></script>
+  <script src="js/dsb-radio.js" data-defer="dsb"></script>
+  <script src="js/dsb-noderunner.js" data-defer="dsb"></script>
+  <script src="js/dsb-collision.js" data-defer="dsb"></script>
   <script src="js/scene-dsb.js"></script>
   <script src="js/bifrost-models.js"></script>
   <script src="js/bifrost-gate.js"></script>
+  <script src="js/totem-models.js"></script>
+  <script src="js/totem-glow.js"></script>
   <script src="js/bifrost-isle.js"></script>
   <script src="js/bifrost-heimdall.js"></script>
   <script src="js/bifrost-window.js"></script>
   <script src="js/scene-bifrost.js"></script>
+  <script src="js/scene-timechain.js"></script>
+  <script src="js/timechain-beer.js" data-defer="timechain"></script>
+  <script src="js/timechain-data.js" data-defer="timechain"></script>
+  <script src="js/timechain-blocks.js" data-defer="timechain"></script>
+  <script src="js/timechain-charts.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-models.js" data-defer="timechain"></script>
+  <script src="js/timechain-interior.js" data-defer="timechain"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
-  <script src="js/poker-rules.js"></script>
-  <script src="js/poker-live.js"></script>
-  <script src="js/poker-cards.js"></script>
+  <script src="js/poker-rules.js" data-defer="poker"></script>
+  <script src="js/poker-live.js" data-defer="poker"></script>
+  <script src="js/poker-cards.js" data-defer="poker"></script>
   <script src="js/poker-themes.js"></script>
-  <script src="js/poker-models.js"></script>
-  <script src="js/poker-hud.js"></script>
+  <script src="js/poker-models.js" data-defer="poker"></script>
+  <script src="js/poker-hud.js" data-defer="poker"></script>
   <script src="js/scene-poker.js"></script>
   <script src="js/director.js"></script>
 </body>

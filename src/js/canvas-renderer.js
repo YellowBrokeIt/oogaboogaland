@@ -75,7 +75,7 @@
     }
     const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0, scrMinX: 0, scrMinY: 0, scrMaxX: 0, scrMaxY: 0 });
       }
       const rec = pool[poolUsed++];
       if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
@@ -103,6 +103,45 @@
       rippleCircle[i * 2 + 1] = Math.sin(i * Math.PI / 24);
     }
     const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, scorch: 0, ember: 0, tip: 0, smokeOpacity: 1, depthBias: 0, matrixLiving: false, matrixEmissiveLiving: false, matrixCloud: false, matrixFullCave: 0 };
+    // Per-vertex transform memo inside one shadeNode call: welded geometry
+    // (island, water, boxes) references each vertex once per face, and the
+    // world and view stages round through Float32Array storage either way, so
+    // cached Float32Array copies are bit-identical to recomputing. Eight cache
+    // slots per vertex index cover the four lake variants (waves x charge
+    // rise); waterBody/liquid/projective nodes opt out entirely.
+    let wCache = new Float32Array(0), vCache = new Float32Array(0);
+    let wStamp = new Int32Array(0), vStamp = new Int32Array(0), vertexGen = 0;
+    const growVertexCache = (slots) => {
+      let capacity = Math.max(4096, wStamp.length);
+      while (capacity < slots) capacity *= 2;
+      const wNext = new Float32Array(capacity * 3), vNext = new Float32Array(capacity * 3);
+      const wsNext = new Int32Array(capacity), vsNext = new Int32Array(capacity);
+      wNext.set(wCache); vNext.set(vCache); wsNext.set(wStamp); vsNext.set(vStamp);
+      wCache = wNext; vCache = vNext; wStamp = wsNext; vStamp = vsNext;
+    };
+    // Face/line colours interned by their rounded ints: one string per colour
+    // per page instead of one per shaded face per frame.
+    const styleCache = new Map();
+    const styleFor = (r, g, b) => {
+      const key = (r << 16) | (g << 8) | b;
+      let s = styleCache.get(key);
+      if (s === undefined) {
+        s = `rgb(${r},${g},${b})`;
+        if (styleCache.size >= 16384) styleCache.clear();
+        styleCache.set(key, s);
+      }
+      return s;
+    };
+    // One composed view*world per mirror node per render (draw order may
+    // interleave ripples, sheen and body for the same record).
+    let mirrorComposeNode = null;
+    const composeMirrorView = (node) => {
+      if (mirrorComposeNode !== node) {
+        mat4.multiply(rippleView, view, node.world);
+        mirrorComposeNode = node;
+      }
+      return rippleView;
+    };
     const mirrorDebug = {
       active: false, faux: true, portal: false, reveal: 0, surfaceDrawn: false, captureValid: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true, reflectionOnlyCount: 0, planeDistance: 0, bodyContacts: 0, bodyWaves: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), shardsDrawn: 0, environmentPassCount: 0, environmentFaces: 0, environmentSize: 0, environmentResources: 0, skipReason: "canvas-faux"
@@ -136,6 +175,13 @@
       skyGradient.addColorStop(1, `rgb(${Math.round(skyInts[0] * 0.55)},${Math.round(skyInts[1] * 0.55)},${Math.round(skyInts[2] * 0.55)})`);
     };
     const clipNear = (src, count, near, dst) => {
+      // All inside: the clip is the identity copy, priced per vertex.
+      let inside = true;
+      for (let i = 0; i < count; i++) if (src[i * 3 + 2] > -near) { inside = false; break; }
+      if (inside) {
+        for (let i = 0; i < count * 3; i++) dst[i] = src[i];
+        return count;
+      }
       let out = 0;
       for (let i = 0; i < count; i++) {
         const ax = src[i * 3], ay = src[i * 3 + 1], az = src[i * 3 + 2];
@@ -265,6 +311,9 @@
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2, cutawayMaxY = Infinity;
     const lightDir = new Float32Array([0, 1, 0]);
     let directStrength = 1, ambientFloor = 0.3, diffuseFloor = 0, skyLuma = 0.5, groundLuma = 0.2;
+    let waterTime = 0;
+    const waterWave = new Float64Array(3), waterBodyPoint = new Float64Array(3);
+    let pointLights = null, pointLightCount = 0;
     let spotLight = null;
     const spotEnergy = (x, y, z, nx, ny, nz) => {
       if (!spotLight || spotLight[3] <= 0) return 0;
@@ -338,6 +387,44 @@
       const h = m[3] * x + m[7] * y + m[11] * z + m[15];
       out[0] /= h; out[1] /= h; out[2] /= h;
     };
+    // Reject a complete static bounding box before walking its faces. The
+    // mixed perspective/orthographic side planes are linear in view space.
+    // Dynamic surfaces and Matrix receiver planes keep their existing path.
+    const matrixReceiverCache = new WeakMap();
+    const hasMatrixReceiver = (node) => {
+      const g = node.geometry;
+      if (matrixModeOf(node) || node.tip || g.matrixCave || g.matrixRevealBacking || g.matrixWorldGlyphSurface) return true;
+      // Face flags are mutable until first render, so a cached verdict holds
+      // only while the face array is the same object.
+      let entry = matrixReceiverCache.get(g);
+      if (entry && entry.faces === g.faces) return entry.receiver;
+      let receiver = false;
+      if (g.faces) for (const face of g.faces) {
+        if (face.matrixCave || face.matrixPermanentFallback || face.matrixLocalGlyphSurface || face.matrixWorldGlyphSurface || face.color?.[3] < 0) { receiver = true; break; }
+      }
+      matrixReceiverCache.set(g, { faces: g.faces, receiver });
+      return receiver;
+    };
+    const outsideView = (node) => {
+      const g = node.geometry, w = node.world;
+      if (w[3] || w[7] || w[11] || w[15] !== 1) return false;
+      if (matrixActive || matrixPermanentCave && hasMatrixReceiver(node) || g.matrixGlyph || g.matrixLocalGlyphSurface || g.clipPlane || g.clipSlab || g.clipSlab2 || g.clipMinY !== undefined || g.clipMaxY !== undefined || cutawayRegionCount || cutawayMaxY < Infinity || g.projective || g.portalSurface || g.lakeBody || g.lakeWaves || g.lakeChargeRise || node.matrixCloud || node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly || g.reflector) return false;
+      const b = BL.scene.boundsOf(g);
+      const margin = g.lines?.length ? 8 : 3;
+      let outside = 31;
+      for (let corner = 0; corner < 8 && outside; corner++) {
+        const x = b[corner & 1 ? "max" : "min"][0], y = b[corner & 2 ? "max" : "min"][1], z = b[corner & 4 ? "max" : "min"][2];
+        const wx = w[0] * x + w[4] * y + w[8] * z + w[12], wy = w[1] * x + w[5] * y + w[9] * z + w[13], wz = w[2] * x + w[6] * y + w[10] * z + w[14];
+        const vx = view[0] * wx + view[4] * wy + view[8] * wz + view[12], vy = view[1] * wx + view[5] * wy + view[9] * wz + view[13], depth = -(view[2] * wx + view[6] * wy + view[10] * wz + view[14]);
+        const span = projectedDepth(depth), hx = span * (width / 2 + margin) / lastF, hy = span * (height / 2 + margin) / lastF;
+        // Match the seven-pixel line rejection (including its glow) or the
+        // two-pixel face rejection, plus one for Float32 world/view rounding.
+        // Crossing boxes are always retained.
+        const epsilon = 1e-4 * (1 + Math.abs(wx) + Math.abs(wy) + Math.abs(wz));
+        outside &= (depth < near - epsilon ? 1 : 0) | (vx < -hx - epsilon ? 2 : 0) | (vx > hx + epsilon ? 4 : 0) | (vy < -hy - epsilon ? 8 : 0) | (vy > hy + epsilon ? 16 : 0);
+      }
+      return outside !== 0;
+    };
     const shadeNode = (node) => {
       const opacity = (node.smokeOpacity === undefined ? 1 : node.smokeOpacity) * (node.geometry.glassOpacity || node.geometry.glass || 1) * (node.geometry.cutawayHide ? 1 - cutawayFade : 1);
       if (opacity === 0) return;
@@ -355,7 +442,15 @@
       const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly || node.geometry.reflector);
       const portalFace = !!node.mirrorPortal || !!node.mirrorWalkThrough && mirrorDebug.portal;
       const localMatrixGlyph = !!node.geometry.matrixGlyph;
-      const liquid = !!node.geometry.portalSurface, projective = !!node.geometry.projective;
+      const liquid = !!node.geometry.portalSurface, rectangular = !!node.geometry.portalRect, projective = !!node.geometry.projective;
+      const waterBody = node.geometry.lakeBody;
+      // Static-input vertices transform once per shadeNode call; lake faces
+      // key their cache slot by the two adjustments they may need.
+      const gen = ++vertexGen;
+      const cacheVerts = !waterBody && !liquid && !projective;
+      const waving = !!node.geometry.lakeWaves;
+      const riseParts = node.geometry.lakeCharge, riseCurve = node.geometry.lakeFlowCurve;
+      const rising = !!(node.geometry.lakeChargeRise && riseParts && riseParts[1] > 0 && riseCurve);
       // Every voxel face in a glyph shares this instance plane and basis.
       const glyphLength = localMatrixGlyph ? Math.hypot(w[8], w[9], w[10]) : 1;
       const glyphNx = w[8] / glyphLength, glyphNy = w[9] / glyphLength, glyphNz = w[10] / glyphLength;
@@ -383,20 +478,54 @@
             // Portal faces are radial strips. Skip those beyond the reveal,
             // then trim only the crossing strip; the interior keeps its scale.
             const a = idx[0] * 3, b = idx[1] * 3;
-            if (Math.min(Math.hypot(verts[a], verts[a + 2]), Math.hypot(verts[b], verts[b + 2])) >= node.portalReveal) continue;
+            const ra=rectangular?Math.max(Math.abs(verts[a]),Math.abs(verts[a+2])):Math.hypot(verts[a],verts[a+2]);
+            const rb=rectangular?Math.max(Math.abs(verts[b]),Math.abs(verts[b+2])):Math.hypot(verts[b],verts[b+2]);
+            if (Math.min(ra,rb) >= node.portalReveal) continue;
           }
           let centerX = 0, centerY = 0, centerZ = 0, liquidX = 0, liquidZ = 0;
+          const variant = face.lake ? (waving ? 1 : 0) | (rising ? 2 : 0) : 0;
           for (let k = 0; k < count; k++) {
             const b = idx[k] * 3;
-            let x = verts[b], z = verts[b + 2];
+            let slot = 0;
+            if (cacheVerts) {
+              slot = (idx[k] << 2) | variant;
+              if (slot * 3 + 3 > wCache.length) growVertexCache(slot + 1);
+              if (wStamp[slot] === gen) {
+                const at = slot * 3;
+                V[k][0] = wCache[at]; V[k][1] = wCache[at + 1]; V[k][2] = wCache[at + 2];
+                centerX += V[k][0]; centerY += V[k][1]; centerZ += V[k][2];
+                continue;
+              }
+            }
+            let x = verts[b], y = verts[b + 1], z = verts[b + 2];
+            if (waterBody && waterBody[2] > 0) {
+              BL.poolWater.sampleBody(waterBodyPoint, x, y, z, waterBody);
+              x = waterBodyPoint[0]; y = waterBodyPoint[1]; z = waterBodyPoint[2];
+            }
             if (liquid) {
-              const radius = Math.hypot(x, z);
+              const radius = rectangular?Math.max(Math.abs(x),Math.abs(z)):Math.hypot(x, z);
               if (radius > node.portalReveal) { const clip = node.portalReveal / radius; x *= clip; z *= clip; }
               liquidX += x / count; liquidZ += z / count;
             }
-            const displacement = liquid ? BL.oogaPortalModels.liquidHeight(x, z, node.portalTime, node.portalSurge) : 0;
-            mat4.transformPoint(V[k], w, x, verts[b + 1] + displacement, z);
-            if (projective) divideW(V[k], w, x, verts[b + 1] + displacement, z);
+            const displacement = liquid ? BL.oogaPortalModels.liquidHeight(x, z, node.portalTime, node.portalSurge, rectangular) : 0;
+            mat4.transformPoint(V[k], w, x, y + displacement, z);
+            if (face.lake && node.geometry.lakeWaves) {
+              BL.poolWater.sampleWaves(waterWave, V[k][0], V[k][2], node.geometry.lakeWaves, node.geometry.lakeWaveEnd);
+              V[k][1] += waterWave[0];
+            }
+            const charge = node.geometry.lakeCharge, curve = node.geometry.lakeFlowCurve;
+            if (face.lake && node.geometry.lakeChargeRise && charge && charge[1] > 0 && curve) {
+              const dx = V[k][0] - curve[0], dz = V[k][2] - curve[1], tau = Math.PI * 2;
+              let distance = Math.abs(((Math.atan2(dx, dz) - curve[2]) % tau + tau) % tau * curve[3]);
+              if (charge[2] > 2.5) distance = Math.min(distance, Math.max(0, charge[3] - distance));
+              V[k][1] += node.geometry.lakeChargeRise * charge[1] * (1 - smooth((distance - charge[0] + 0.45) / 0.6));
+            }
+            if (projective) divideW(V[k], w, x, y + displacement, z);
+            if (cacheVerts) {
+              const at = slot * 3;
+              wStamp[slot] = gen;
+              wCache[at] = V[k][0]; wCache[at + 1] = V[k][1]; wCache[at + 2] = V[k][2];
+            }
             centerX += V[k][0];
             centerY += V[k][1];
             centerZ += V[k][2];
@@ -420,10 +549,23 @@
           nx /= nlen;
           ny /= nlen;
           nz /= nlen;
-          if (!portalFace && perspectiveWeight * (nx * (V[0][0] - eye.x) + ny * (V[0][1] - eye.y) + nz * (V[0][2] - eye.z)) - orthographicDepth * (nx * view[2] + ny * view[6] + nz * view[10]) >= 0) continue;
+          if (!portalFace && perspectiveWeight * (nx * (V[0][0] - eye.x) + ny * (V[0][1] - eye.y) + nz * (V[0][2] - eye.z)) - orthographicDepth * (nx * view[2] + ny * view[6] + nz * view[10]) >= 0) {
+            if (!node.geometry.twoSided) continue;
+            nx = -nx; ny = -ny; nz = -nz;
+          }
           centerX /= count;
           centerY /= count;
           centerZ /= count;
+          const lakeOcclude = node.geometry.lakeOcclude;
+          if (lakeOcclude && lakeOcclude[3] > 0 && eye.y > lakeOcclude[1] && centerY < lakeOcclude[1]) {
+            const dx = perspectiveWeight * (eye.x - centerX) + orthographicDepth * view[2];
+            const dy = perspectiveWeight * (eye.y - centerY) + orthographicDepth * view[6];
+            const dz = perspectiveWeight * (eye.z - centerZ) + orthographicDepth * view[10];
+            if (dy > 0) {
+              const crossing = (lakeOcclude[1] - centerY) / dy;
+              if (Math.hypot(centerX + dx * crossing - lakeOcclude[0], centerZ + dz * crossing - lakeOcclude[2]) < lakeOcclude[3]) continue;
+            }
+          }
           let faceOpacity = opacity;
           if (node.geometry.lightBeam) {
             const along = ((centerX - w[12]) * w[0] + (centerY - w[13]) * w[1] + (centerZ - w[14]) * w[2]) / (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
@@ -548,8 +690,9 @@
               if (surfaceCount < 3) continue;
             }
             // A slab (n, d) keeps |n.p + d| <= 1: two planes, n.p + d - 1 <= 0 and -n.p - d - 1 <= 0.
-            const slab = node.geometry.clipSlab;
-            if (slab) {
+            for (let slabIndex = 0; slabIndex < 2; slabIndex++) {
+              const slab = slabIndex ? node.geometry.clipSlab2 : node.geometry.clipSlab;
+              if (!slab) continue;
               if (!surface) {
                 surface = MIRROR_CLIP_IN;
                 for (let k = 0; k < count; k++) {
@@ -561,14 +704,23 @@
                 surfaceCount = clipPlane(surface, surfaceCount, slab[0] * sign, slab[1] * sign, slab[2] * sign, slab[3] * sign - 1, destination);
                 surface = destination;
               }
-              if (surfaceCount < 3) continue;
             }
+            if (surface && surfaceCount < 3) continue;
             if (selective) beginCutaway(surface, surfaceCount);
             for (let piece = 0; selective ? nextCutaway() : piece < 1; piece++) {
               if (selective) { surface = cutawaySurface; surfaceCount = cutawayCount; }
               for (let k = 0; k < surfaceCount; k++) {
                 if (surface) mat4.transformPoint(V[k], view, surface[k * 3], surface[k * 3 + 1], surface[k * 3 + 2]);
-                else mat4.transformPoint(V[k], view, V[k][0], V[k][1], V[k][2]);
+                else if (cacheVerts) {
+                  const slot = (idx[k] << 2) | variant, at = slot * 3;
+                  if (vStamp[slot] === gen) {
+                    CLIP_IN[k * 3] = vCache[at]; CLIP_IN[k * 3 + 1] = vCache[at + 1]; CLIP_IN[k * 3 + 2] = vCache[at + 2];
+                    continue;
+                  }
+                  mat4.transformPoint(V[k], view, V[k][0], V[k][1], V[k][2]);
+                  vStamp[slot] = gen;
+                  vCache[at] = V[k][0]; vCache[at + 1] = V[k][1]; vCache[at + 2] = V[k][2];
+                } else mat4.transformPoint(V[k], view, V[k][0], V[k][1], V[k][2]);
                 CLIP_IN[k * 3] = V[k][0];
                 CLIP_IN[k * 3 + 1] = V[k][1];
                 CLIP_IN[k * 3 + 2] = V[k][2];
@@ -594,6 +746,7 @@
               rec.mirror = mirrorFace;
               rec.mirrorNode = mirrorFace ? node : null;
               rec.imageNode = node.geometry.imageSurface ? node : null;
+              rec.scrMinX = minX; rec.scrMinY = minY; rec.scrMaxX = maxX; rec.scrMaxY = maxY;
               if (mirrorFace) {
                 rec.mirrorMinX = rec.mirrorMinY = Infinity;
                 rec.mirrorMaxX = rec.mirrorMaxY = -Infinity;
@@ -650,11 +803,68 @@
               const tip = node.tip > 1.5 ? 0 : node.tip || 0;
               const fog = localMatrixGlyph ? smooth((glyphDistance - fogNear) / (fogFar - fogNear)) : Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear)));
               const beam = localMatrixGlyph ? 0 : spotEnergy(centerX, centerY, centerZ, nx, ny, nz) * (1 - Math.min(1, emissive));
-              let red = lerp(lerp(cr * (k + (beam ? beam * spotLight[8] : 0)), 214, tip * 0.88), fogRgb[0], fog);
-              let green = lerp(lerp(cg * (k + (beam ? beam * spotLight[9] : 0)), 255, tip * 0.88), fogRgb[1], fog);
-              let blue = lerp(lerp(cb * (k + (beam ? beam * spotLight[10] : 0)), 227, tip * 0.88), fogRgb[2], fog);
+              let pointR = 0, pointG = 0, pointB = 0;
+              if (!localMatrixGlyph) for (let i = 0; i < pointLightCount; i++) {
+                const o = i * 8, dx = pointLights[o] - centerX, dy = pointLights[o + 1] - centerY, dz = pointLights[o + 2] - centerZ;
+                const radius = pointLights[o + 3], distance2 = dx * dx + dy * dy + dz * dz;
+                if (distance2 >= radius * radius || distance2 < 1e-8) continue;
+                const distance = Math.sqrt(distance2), facing = Math.max(0, (nx * dx + ny * dy + nz * dz) / distance);
+                const falloff = 1 - distance / radius;
+                const strength = (pointLights[o + 7] > 0.5 ? 0.72 * (1 - smooth((distance / radius - 0.2) / 0.8)) : falloff * falloff) * facing * (1 - Math.min(1, emissive));
+                pointR += pointLights[o + 4] * strength;
+                pointG += pointLights[o + 5] * strength;
+                pointB += pointLights[o + 6] * strength;
+              }
+              let red = lerp(lerp(cr * (k + pointR + (beam ? beam * spotLight[8] : 0)), 214, tip * 0.88), fogRgb[0], fog);
+              let green = lerp(lerp(cg * (k + pointG + (beam ? beam * spotLight[9] : 0)), 255, tip * 0.88), fogRgb[1], fog);
+              let blue = lerp(lerp(cb * (k + pointB + (beam ? beam * spotLight[10] : 0)), 227, tip * 0.88), fogRgb[2], fog);
+              if (face.lake) {
+                // Match the WebGL waterfall palette and rectangular cells, including displaced wave lighting.
+                const flow = node.geometry.lakeFlow, curve = node.geometry.lakeFlowCurve;
+                let coordX = flow ? centerX * flow[0] + centerY * flow[1] + centerZ * flow[2] + flow[3] : centerX;
+                let coordZ = flow ? centerX * flow[4] + centerY * flow[5] + centerZ * flow[6] + flow[7] : centerZ;
+                if (curve) {
+                  const dx = centerX - curve[0], dz = centerZ - curve[1], tau = Math.PI * 2;
+                  coordX = Math.hypot(dx, dz);
+                  coordZ = ((Math.atan2(dx, dz) - curve[2]) % tau + tau) % tau * curve[3];
+                }
+                const flowX = coordX + 0.12 * Math.sin(coordZ * 0.35 + waterTime * 0.4) - waterTime * 0.08, flowZ = coordZ - waterTime * 0.3;
+                let h = (Math.imul(Math.floor(flowX / 0.25), 73856093) ^ Math.imul(Math.floor(flowZ / 0.75), 19349663)) >>> 0;
+                h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+                const band = h % 3, foam = h % 13 === 0 && flowZ / 0.75 - Math.floor(flowZ / 0.75) < 1 / 3;
+                waterWave.fill(0);
+                if (node.geometry.lakeWaves) BL.poolWater.sampleWaves(waterWave, centerX, centerZ, node.geometry.lakeWaves, node.geometry.lakeWaveEnd);
+                // The hanging water uses its curved face normal; the free surface uses the wave gradient.
+                const side = ny < 0 ? -1 : 1, waving = !!node.geometry.lakeWaves;
+                const waterNx = waving ? -waterWave[1] : nx * side, waterNy = waving ? 1 : ny * side, waterNz = waving ? -waterWave[2] : nz * side;
+                const length = Math.hypot(waterNx, waterNy, waterNz);
+                const shade = 0.88 + 0.22 * Math.max(0, (-waterNx * 0.4 + waterNy + waterNz * 0.3) / length / Math.sqrt(1.25));
+                const pulse = 0.96 + 0.08 * Math.sin(coordZ * 1.04719755 - waterTime * Math.PI);
+                const grain = 0.94 + 0.06 * Math.sin(flowX * 43) * Math.sin(flowZ * 31);
+                const sheen = (0.5 + 0.5 * Math.sin(flowX * 6 + Math.sin(flowZ * 4))) ** 12;
+                const glow = shade * pulse * grain * Math.max(0.35, materialGlow) * 1.08;
+                const dx = perspectiveWeight * (eye.x - centerX) + orthographicDepth * view[2];
+                const dy = perspectiveWeight * (eye.y - centerY) + orthographicDepth * view[6];
+                const dz = perspectiveWeight * (eye.z - centerZ) + orthographicDepth * view[10];
+                const grazing = 1 - Math.min(1, Math.abs((waterNx * dx + waterNy * dy + waterNz * dz) / length / (Math.hypot(dx, dy, dz) || 1)));
+                rec.smokeOpacity = Math.min(0.95, opacity + (foam ? 0.12 : 0) + grazing * grazing * 0.06);
+                red = lerp((foam ? 226 : band === 0 ? 45 : band === 1 ? 74 : 124) * glow + 25.5 * sheen, fogRgb[0], fog);
+                green = lerp((foam ? 245 : band === 0 ? 125 : band === 1 ? 166 : 200) * glow + 40.8 * sheen, fogRgb[1], fog);
+                blue = lerp(255 * glow + 45.9 * sheen, fogRgb[2], fog);
+                const charge = node.geometry.lakeCharge;
+                if (charge && charge[1] > 0) {
+                  let distanceAlong = charge[2] < 1.5 ? Math.hypot(centerX - charge[4], centerZ - charge[5]) : Math.abs(coordZ);
+                  if (charge[2] > 2.5) distanceAlong = Math.min(distanceAlong, Math.max(0, charge[3] - distanceAlong));
+                  const lit = 1 - smooth((distanceAlong - charge[0] + 0.45) / 0.6);
+                  const leading = 1 - smooth(Math.abs(distanceAlong - charge[0]) / 0.9);
+                  const strength = Math.min(1, charge[1] * (lit * 0.7 + leading * 0.3));
+                  red = lerp(red, lerp(215, fogRgb[0], fog), strength * 0.75);
+                  green = lerp(green, lerp(245, fogRgb[1], fog), strength * 0.75);
+                  blue = lerp(blue, lerp(255, fogRgb[2], fog), strength * 0.75);
+                }
+              }
               if (liquid) {
-                const time = node.portalTime, radius = Math.hypot(liquidX, liquidZ);
+                const time = node.portalTime, radius = rectangular?Math.max(Math.abs(liquidX),Math.abs(liquidZ)):Math.hypot(liquidX, liquidZ);
                 const interference = Math.sin(Math.hypot(liquidX - 0.22, liquidZ + 0.17) * 32 - time * 4)
                   + Math.sin(Math.hypot(liquidX + 0.31, liquidZ - 0.24) * 25 - time * 3);
                 const crest = smooth((interference - 0.8) / 1.1), pulse = (0.5 + 0.5 * Math.sin(radius * 20 - time * 2)) ** 12;
@@ -674,7 +884,7 @@
                 green = lerp(green, mg, matrixAmount);
                 blue = lerp(blue, mb, matrixAmount);
               }
-              if (!localMatrixGlyph) rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(red))},${Math.min(255, Math.round(green))},${Math.min(255, Math.round(blue))})`;
+              if (!localMatrixGlyph) rec.style = rec.mirror ? mirrorStyle : styleFor(Math.min(255, Math.round(red)), Math.min(255, Math.round(green)), Math.min(255, Math.round(blue)));
               rec.matrix = 0;
               if (localMatrixGlyph || maximumFront && (partial || !matrixLiving && !localGlyphSurface)) {
                 rec.matrixMinX = Math.max(0, Math.floor(Math.min(width, minX))); rec.matrixMaxX = Math.min(width, Math.ceil(Math.max(0, maxX)));
@@ -684,7 +894,7 @@
                     rec.matrixRed = Math.max(0, red - fogRgb[0] * fog);
                     rec.matrixGreen = Math.max(0, green - fogRgb[1] * fog);
                     rec.matrixBlue = Math.max(0, blue - fogRgb[2] * fog);
-                    rec.style = `rgb(${Math.min(255, Math.round(rec.matrixRed))},${Math.min(255, Math.round(rec.matrixGreen))},${Math.min(255, Math.round(rec.matrixBlue))})`;
+                    rec.style = styleFor(Math.min(255, Math.round(rec.matrixRed)), Math.min(255, Math.round(rec.matrixGreen)), Math.min(255, Math.round(rec.matrixBlue)));
                   } else {
                     rec.matrix = maximumFront;
                     rec.matrixWall = Math.abs(ny) >= Math.max(Math.abs(nx), Math.abs(nz)) ? 0 : Math.abs(nx) >= Math.abs(nz) ? 1 : 2;
@@ -763,8 +973,8 @@
             const red = lerp(c[0] * scorch, heat, ember * 0.9);
             const green = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
             const blue = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
-            rec.style = `rgb(${Math.round(red)},${Math.round(green)},${Math.round(blue)})`;
-            rec.coreStyle = rec.lineGlow > 0.5 ? `rgb(${Math.round(red + (255 - red) * 0.55)},${Math.round(green + (255 - green) * 0.55)},${Math.round(blue + (255 - blue) * 0.55)})` : "";
+            rec.style = styleFor(Math.round(red), Math.round(green), Math.round(blue));
+            rec.coreStyle = rec.lineGlow > 0.5 ? styleFor(Math.round(red + (255 - red) * 0.55), Math.round(green + (255 - green) * 0.55), Math.round(blue + (255 - blue) * 0.55)) : "";
           }
         }
       }
@@ -824,7 +1034,44 @@
         BATCH_NODE.scorch = Math.max(0, -data[offset + 17]);
         BATCH_NODE.tip = Math.max(0, data[offset + 18]);
         BATCH_NODE.smokeOpacity = data[offset + 18] < 0 ? -1 - data[offset + 18] : 1;
+        // Same conservative box reject shadeNode passes at the dispatch site;
+        // outsideView declines every matrix/mirror/water path itself.
+        if (!glyphs && outsideView(BATCH_NODE)) continue;
         shadeNode(BATCH_NODE);
+      }
+    };
+    // The per-frame gather callback is module-level: render() re-arms the two
+    // scratch fields instead of allocating a closure each frame.
+    let gatheredMirror = null;
+    const gatherNode = (node) => {
+      if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly)) return;
+      if (node.mirror || node.mirrorPortal) {
+        if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
+        gatheredMirror = node;
+        mirrorDebug.active = true;
+        mirrorDebug.skippedPassCount++;
+        const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
+        mirrorDebug.planeCenter[0] = w[12];
+        mirrorDebug.planeCenter[1] = w[13];
+        mirrorDebug.planeCenter[2] = w[14];
+        mirrorDebug.planeNormal[0] = w[8] / nlen;
+        mirrorDebug.planeNormal[1] = w[9] / nlen;
+        mirrorDebug.planeNormal[2] = w[10] / nlen;
+        const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+        const eyeD = (eye.x - center[0]) * normal[0] + (eye.y - center[1]) * normal[1] + (eye.z - center[2]) * normal[2];
+        mirrorDebug.planeDistance = Math.abs(eyeD);
+        mirrorDebug.portal = !!node.mirrorPortal;
+        mirrorDebug.reveal = Math.max(0, Math.min(1, node.mirrorReveal || 0));
+        mirrorDebug.cameraPosition[0] = eye.x - 2 * eyeD * normal[0];
+        mirrorDebug.cameraPosition[1] = eye.y - 2 * eyeD * normal[1];
+        mirrorDebug.cameraPosition[2] = eye.z - 2 * eyeD * normal[2];
+        mirrorDebug.cameraTarget[0] = mirrorDebug.cameraPosition[0] + normal[0];
+        mirrorDebug.cameraTarget[1] = mirrorDebug.cameraPosition[1] + normal[1];
+        mirrorDebug.cameraTarget[2] = mirrorDebug.cameraPosition[2] + normal[2];
+      }
+      if (!hiddenFromCutaway(node) && (environmentCapture || !hiddenFromCamera(node))) {
+        if (node.instanceData) shadeBatch(node);
+        else if (node.geometry && !outsideView(node)) shadeNode(node);
       }
     };
     // Integrate each voxel face over the sample footprint: keeps small distant pixels, no screen-size cutoff.
@@ -1089,7 +1336,7 @@
       if (!ripples || !ripples.active) return;
       const { CAPACITY, START_RADIUS, SPEED, WIDTH, GLYPH_THRESHOLD } = BL.mirrorRipples;
       const waves = ripples.waves;
-      mat4.multiply(rippleView, view, node.world);
+      composeMirrorView(node);
       const m = rippleView, scale = Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[4], m[5]));
       // Paint within the mirror face's clip and depth order. The fallback keeps
       // its silver tint beneath small light/dark crests instead of an opaque flash.
@@ -1147,7 +1394,7 @@
       const bounds = BL.scene.boundsOf(source.mirrorCaptureGeometry || source.geometry), min = bounds.min, max = bounds.max;
       const original = geometry.mirrorSource, verts = geometry.verts;
       const ox = original ? original[0] - verts[0] : 0, oy = original ? original[1] - verts[1] : 0, oz = original ? original[2] - verts[2] : 0;
-      mat4.multiply(rippleView, view, node.world);
+      composeMirrorView(node);
       // The fallback's silver streak belongs to the glass plane. Project its
       // fixed endpoints rather than rebuilding a diagonal from screen bounds.
       const h = max[1] - min[1];
@@ -1206,7 +1453,7 @@
       }
       const bounds = BL.scene.boundsOf(node.geometry), minX = bounds.min[0], minY = bounds.min[1];
       const dx = (bounds.max[0] - minX) / body.width, dy = (bounds.max[1] - minY) / body.height;
-      mat4.multiply(rippleView, view, node.world);
+      composeMirrorView(node);
       // Sample the same fixed silhouette atlas as WebGL. Only the narrow crests
       // paint over the fallback's silver face, leaving the body's interior clear.
       // Fractured panes share the atlas; each face samples only its own bounds.
@@ -1440,10 +1687,9 @@
         fogNear = near0;
         fogFar = Math.max(far0, near0 + 1);
       } else {
-        fogNear = 1e8;
-        fogFar = 1e8 + 1;
+      fogNear = 1e8;
+      fogFar = 1e8 + 1;
       }
-      if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       const gradientSky = !!(horizon && zenith);
       if (gradientSky) buildSky(horizon, zenith);
       if (clear !== clearRef) {
@@ -1472,8 +1718,11 @@
       directStrength = strength;
       ambientFloor = ambient;
       diffuseFloor = diffuse;
+      pointLights = opts.lights || null;
+      pointLightCount = pointLights ? Math.min(6, opts.lightCount || 0) : 0;
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
+      waterTime = performance.now() * 0.001 % 3600;
       poolUsed = 0;
       suppressed = rippleSurfaces = rippleWaves = 0;
       mirrorDebug.active = false;
@@ -1482,40 +1731,12 @@
       mirrorDebug.surfaceDrawn = false;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirrorDebug.shardsDrawn = 0;
-      let mirrorNode = null;
+      gatheredMirror = null;
+      mirrorComposeNode = null;
       const viewActor = !environmentCapture && opts.beforeView?.();
       updateWorld(root, null);
-      traverseVisible(root, (node) => {
-        if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly)) return;
-        if (node.mirror || node.mirrorPortal) {
-          if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
-          mirrorNode = node;
-          mirrorDebug.active = true;
-          mirrorDebug.skippedPassCount++;
-          const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
-          mirrorDebug.planeCenter[0] = w[12];
-          mirrorDebug.planeCenter[1] = w[13];
-          mirrorDebug.planeCenter[2] = w[14];
-          mirrorDebug.planeNormal[0] = w[8] / nlen;
-          mirrorDebug.planeNormal[1] = w[9] / nlen;
-          mirrorDebug.planeNormal[2] = w[10] / nlen;
-          const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
-          const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
-          mirrorDebug.planeDistance = Math.abs(eyeD);
-          mirrorDebug.portal = !!node.mirrorPortal;
-          mirrorDebug.reveal = Math.max(0, Math.min(1, node.mirrorReveal || 0));
-          mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
-          mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
-          mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
-          mirrorDebug.cameraTarget[0] = mirrorDebug.cameraPosition[0] + normal[0];
-          mirrorDebug.cameraTarget[1] = mirrorDebug.cameraPosition[1] + normal[1];
-          mirrorDebug.cameraTarget[2] = mirrorDebug.cameraPosition[2] + normal[2];
-        }
-        if (!hiddenFromCutaway(node) && (environmentCapture || !hiddenFromCamera(node))) {
-          if (node.instanceData) shadeBatch(node);
-          else if (node.geometry) shadeNode(node);
-        }
-      });
+      traverseVisible(root, gatherNode);
+      const mirrorNode = gatheredMirror;
       if (viewActor) { opts.afterView?.(); updateWorld(viewActor.root, viewActor.root.parent?.world || null); }
       if (!environmentCapture && mirrorNode && mirrorDebug.shardsDrawn) updateEnvironment(root, mirrorNode, camera, opts);
       active.length = poolUsed;
@@ -1554,69 +1775,99 @@
         ctx.translate(0, hazeShift);
         ctx.fillRect(0, -hazeShift, width, height);
         ctx.translate(0, -hazeShift);
+        const moon = opts.moon, moonSun = opts.moonSun || opts.sunDirection;
+        if (gradientSky && moon && moonSun && moon.y > 0) {
+          const mx = view[0] * moon.x + view[4] * moon.y + view[8] * moon.z;
+          const my = view[1] * moon.x + view[5] * moon.y + view[9] * moon.z;
+          const mz = view[2] * moon.x + view[6] * moon.y + view[10] * moon.z;
+          if (mz < -0.05) {
+            const radius = lastF * 0.05477 / -mz;
+            const cx = width * 0.5 + mx * lastF / -mz, cy = height * 0.5 - my * lastF / -mz;
+            if (cx + radius > 0 && cx - radius < width && cy + radius > 0 && cy - radius < height) {
+              const facing = Math.max(-1, Math.min(1, moon.x * moonSun.x + moon.y * moonSun.y + moon.z * moonSun.z));
+              const tx = moonSun.x - moon.x * facing, ty = moonSun.y - moon.y * facing, tz = moonSun.z - moon.z * facing;
+              const sx = view[0] * tx + view[4] * ty + view[8] * tz;
+              const sy = view[1] * tx + view[5] * ty + view[9] * tz;
+              const k = -facing;
+              ctx.save();
+              ctx.translate(cx, cy);
+              ctx.rotate(Math.atan2(-sy, sx));
+              ctx.globalAlpha = 0.3 + 0.7 * (opts.stars || 0);
+              ctx.fillStyle = "#d1dff6";
+              ctx.beginPath();
+              ctx.arc(0, 0, radius, -Math.PI / 2, Math.PI / 2);
+              ctx.ellipse(0, 0, Math.max(0.001, Math.abs(k) * radius), radius, 0, Math.PI / 2, k >= 0 ? Math.PI * 1.5 : -Math.PI / 2, k < 0);
+              ctx.closePath();
+              ctx.fill();
+              ctx.restore();
+            }
+          }
+        }
       }
       ctx.lineJoin = "round";
       let glyphBlend = false, glyphComposite = "";
+      // Same-value canvas writes skip the state assignment across records;
+      // branches that draw outside the ordinary fill/stroke path reset them.
+      let lastFill = null, lastStroke = null, lastWidth = 0, lastAlpha = NaN;
       for (const rec of active) {
         // Glyphs paint sampled rects, never the polygon path; keep additive state across records without reordering.
         if (rec.matrixGlyph && !rec.line) {
           const composite = rec.matrixGlyphOpacity < 1 ? "source-over" : "lighter";
           if (!glyphBlend || glyphComposite !== composite) { ctx.globalCompositeOperation = glyphComposite = composite; glyphBlend = true; }
           drawMatrixGlyph(rec);
+          lastFill = lastStroke = null; lastWidth = 0; lastAlpha = NaN;
           continue;
         }
-        if (glyphBlend) { ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; glyphBlend = false; }
+        if (glyphBlend) { ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; glyphBlend = false; lastAlpha = 1; }
         ctx.beginPath();
         ctx.moveTo(rec.pts[0], rec.pts[1]);
         if (rec.line) {
-          ctx.globalAlpha = rec.smokeOpacity;
+          if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
           ctx.lineTo(rec.pts[2], rec.pts[3]);
           if (rec.lineGlow > 0) {
-            ctx.strokeStyle = rec.style;
-            ctx.globalAlpha = 0.12 * rec.lineGlow * rec.smokeOpacity;
-            ctx.lineWidth = 11;
+            if (lastStroke !== rec.style) { ctx.strokeStyle = rec.style; lastStroke = rec.style; }
+            const glowAlpha = 0.12 * rec.lineGlow * rec.smokeOpacity;
+            if (lastAlpha !== glowAlpha) { ctx.globalAlpha = glowAlpha; lastAlpha = glowAlpha; }
+            if (lastWidth !== 11) { ctx.lineWidth = 11; lastWidth = 11; }
             ctx.stroke();
-            ctx.globalAlpha = 0.28 * rec.lineGlow * rec.smokeOpacity;
-            ctx.lineWidth = 4.5;
+            const midAlpha = 0.28 * rec.lineGlow * rec.smokeOpacity;
+            if (lastAlpha !== midAlpha) { ctx.globalAlpha = midAlpha; lastAlpha = midAlpha; }
+            if (lastWidth !== 4.5) { ctx.lineWidth = 4.5; lastWidth = 4.5; }
             ctx.stroke();
-            ctx.globalAlpha = rec.smokeOpacity;
+            if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
           }
-          ctx.strokeStyle = rec.coreStyle || rec.style;
-          ctx.lineWidth = rec.lineGlow > 0 ? 1.8 : 1.4;
+          const coreStyle = rec.coreStyle || rec.style;
+          if (lastStroke !== coreStyle) { ctx.strokeStyle = coreStyle; lastStroke = coreStyle; }
+          const coreWidth = rec.lineGlow > 0 ? 1.8 : 1.4;
+          if (lastWidth !== coreWidth) { ctx.lineWidth = coreWidth; lastWidth = coreWidth; }
           ctx.stroke();
-          ctx.globalAlpha = 1;
+          if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
         } else {
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
           if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63))) {
-            if (rec.smokeOpacity !== 1) ctx.globalAlpha = rec.smokeOpacity;
-            ctx.fillStyle = rec.style;
+            if (rec.smokeOpacity !== 1 && lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
+            if (lastFill !== rec.style) { ctx.fillStyle = rec.style; lastFill = rec.style; }
             ctx.fill();
-            ctx.strokeStyle = rec.style;
-            ctx.lineWidth = 1;
+            if (lastStroke !== rec.style) { ctx.strokeStyle = rec.style; lastStroke = rec.style; }
+            if (lastWidth !== 1) { ctx.lineWidth = 1; lastWidth = 1; }
             ctx.stroke();
-            if (rec.smokeOpacity !== 1) ctx.globalAlpha = 1;
+            if (rec.smokeOpacity !== 1 && lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
           }
           if (rec.imageNode) {
-            ctx.globalAlpha = rec.smokeOpacity;
+            if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
             drawImageSurface(rec.imageNode); rec.imageNode = null;
-            ctx.globalAlpha = 1;
+            if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
           }
           if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) {
-            ctx.globalAlpha = rec.smokeOpacity;
+            if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
             drawMatrix(rec);
-            ctx.globalAlpha = 1;
+            if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
           }
           if (rec.mirror) {
             const node = rec.mirrorNode;
             if (!node.mirrorShard && !node.mirrorRippleOnly) mirrorDebug.surfaceDrawn = true;
-            let minX = rec.pts[0], maxX = rec.pts[0], minY = rec.pts[1], maxY = rec.pts[1];
-            for (let k = 1; k < rec.n; k++) {
-              minX = Math.min(minX, rec.pts[k * 2]);
-              maxX = Math.max(maxX, rec.pts[k * 2]);
-              minY = Math.min(minY, rec.pts[k * 2 + 1]);
-              maxY = Math.max(maxY, rec.pts[k * 2 + 1]);
-            }
+            const minX = rec.scrMinX, maxX = rec.scrMaxX, minY = rec.scrMinY, maxY = rec.scrMaxY;
             ctx.save();
             ctx.clip();
             if (rec.portal) {
@@ -1658,6 +1909,12 @@
     };
     const ray = (px, py, camera, out) => mat4.rayFromView(out, view, width, height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
     resize();
+    // Size changes arrive with the viewport; no per-frame client probe.
+    const onResize = () => resize();
+    if (!fixedW) {
+      window.addEventListener("resize", onResize);
+      if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize);
+    }
     return {
       kind: "canvas2d",
       render,
@@ -1666,9 +1923,14 @@
       ray,
       setQuality: () => { },
       releaseGeometry: () => { },
+      createRig: () => null,
       releaseUnused: (live) => { if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {
         destroyEnvironment();
+        if (!fixedW) {
+          window.removeEventListener("resize", onResize);
+          if (window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);
+        }
         mirrorDebug.active = false;
         mirrorDebug.portal = false;
         mirrorDebug.reveal = 0;
@@ -1681,7 +1943,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
       },
       get mirror() {
         return mirrorDebug;

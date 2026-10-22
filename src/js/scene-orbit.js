@@ -23,7 +23,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
   const { clamp, lerp, damp, quat, mulberry32, fnv1a } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
@@ -38,9 +38,8 @@
   const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
   const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
-  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
+  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-90, Math.min(90, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   const SEED = 1;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   // Space in GREEN [.55,.86] frees the clamps, GOLD [.66,.78] is perfect; early staggers, late strains, full pops.
   const COUNT_T = 3, SPOOL_T = 2.6, GREEN = [0.55, 0.86], GOLD = [0.66, 0.78], EARLY = { boost: 0.55, t: 2.2, kick: -0.3 }, LATE_HEAT = 0.3;
@@ -77,7 +76,7 @@
   const SPLASH_BITS = [SPRAY, SPRAY_DK];
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
-    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9),
+    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002,
     time: 0, bloomStrength: 0.55, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, fog: null, fogNear: 260, fogFar: 900
   };
@@ -119,7 +118,7 @@
   // REEL holds where the sky hook reels the flight from (x0,y0,z0) and to (x1,y1,z1).
   const REEL = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
   let orbited = false, spaceCalled = false, stagesDropped = 0, chuteCalled = false, warnAt = 0, flipAt = 0, leanHinted = false, result = null, failure = null, score = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0;
   const placed = [];
   const debris = [];
   const fireballs = [];
@@ -279,7 +278,7 @@
     astroStick = createNode({ position: { x: 0, y: -0.62 * h, z: 0.06 * h }, rotation: { x: Math.PI, y: 0, z: 0 }, scale: { x: 1, y: 0.01, z: 1 }, geometry: rocketModels.measureStick(), visible: false });
     astroLight = createNode({ position: { x: 0, y: 0.95, z: 0 }, geometry: rocketModels.readingLight() });
     addChild(astroStick, astroLight);
-    addChild(astro.parts.armR, astroStick);
+    addChild(astro.parts.armL, astroStick);
     astro.root.visible = false;
     addChild(root, astro.root);
   };
@@ -1292,7 +1291,7 @@
         spawnSmoke(bx - zx * 0.15, by - zy * 0.15, bz - zz * 0.15, flight.state.v.x - mx * 3, flight.state.v.y - my * 3, flight.state.v.z - mz * 3, 0.12, 0.5);
       }
     }
-    const arm = astro.parts.armR;
+    const arm = astro.parts.armL;
     if (eva.measuring > 0) {
       const k = 1 - eva.measuring / EVA.measure;
       eva.yaw = wrap(eva.yaw + wrap(Math.atan2(eva.rockE - eva.e, eva.rockF - eva.f) - eva.yaw) * (1 - Math.exp(-4 * dt)));
@@ -1579,7 +1578,7 @@
     phaseT += dt;
     agent.update(dt);
     const hour = clock.read();
-    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
+    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
     const a = readInput();
     if (phase === "count") {
       const left = Math.ceil(COUNT_T - phaseT);
@@ -1638,11 +1637,6 @@
     updateAudio(lit);
     fx.update(dt);
     stepTweens(dt);
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      hud.setMeter(world.level, METER_CAPACITY, phase === "build" ? "stable" : flight && orbited ? "in low orbit" : "flying");
-    }
   };
   // World markers: green where the flight goes, orange where the shield faces, plus home.
   const MARKER = { x: 0, y: 0 };
@@ -1815,14 +1809,16 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the tally counts the exact bananas and the toasts the
+  // rounded ones (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = flight ? flight.state.p : EYE;
     if (!flight) padBase();
     fx.burst(p.x, p.y + 2, p.z, 20, CONFETTI, 2.2);
@@ -1831,7 +1827,6 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
@@ -1840,7 +1835,10 @@
     renderLocker();
     hud.toast("Loot locker cleared");
   };
-  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  };
   const toggleMute = () => {
     audio.setMuted(!audio.muted);
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
@@ -1954,14 +1952,6 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -2006,8 +1996,6 @@
       else if (action === "leave") go(home);
       else if (action === "act") act();
       else if (action === "mute") toggleMute();
-      else if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") {
         game.clearLoot();
         onLootCleared();
@@ -2025,7 +2013,6 @@
       : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
     document.getElementById("orbit-help").textContent = COARSE ? "Tap a part to add it · hold and drag it onto the rocket" : "Tap or drag a part onto the rocket · drag a row off to remove it";
     if (COARSE) rhud.el.evaBtn.querySelector("small").textContent = "the button";
-    meterTimer = 0;
     cam.buildYaw = -0.64;
     cam.buildPitch = 0.18;
     cam.buildZoom = 1;

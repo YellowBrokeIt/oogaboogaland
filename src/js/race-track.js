@@ -1,4 +1,4 @@
-// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls and baked decor in culled sectors.
+// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls, baked decor and shared foliage in culled sectors.
 //
 // `TRACKS` and `THEMES` hold the definitions. `build` turns a closed Catmull-Rom spline into the road
 // ribbon with curbs, walls and lips before gaps, the terrain skirt in chunks, decor baked per sector,
@@ -110,8 +110,10 @@
     } else if (out.normals) while (out.normals.length < out.verts.length) out.normals.push(0);
     for (const f of geo.faces) out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
   };
-  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1) => {
-    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s;
+  // cos/sin may come precomputed (a fixed yaw cached by the caller, or 1/0 for an upright one), which is
+  // bit-identical: 1 is cos(0) and 0 is sin(0) exactly, and the products were the same multiply.
+  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1, cos, sin) => {
+    const c = (cos === undefined ? Math.cos(yaw) : cos) * s, sn = (sin === undefined ? Math.sin(yaw) : sin) * s;
     data[o] = c; data[o + 1] = 0; data[o + 2] = -sn; data[o + 3] = 0;
     data[o + 4] = 0; data[o + 5] = s; data[o + 6] = 0; data[o + 7] = 0;
     data[o + 8] = sn; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
@@ -152,9 +154,9 @@
       height: (n, d) => n * 5 - 1.6,
       ground: (h, n) => h < 0.4 ? mix(rgb("#e0cf9c"), rgb("#d2bf8a"), n) : h < 1.6 ? mix(rgb("#8fb04a"), rgb("#7a9a3c"), n) : mix(rgb("#6f8f3a"), rgb("#5f7a30"), n),
       decor: [
-        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true, solid: SOLID.palm },
+        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true, shared: true, solid: SOLID.palm },
         { build: (i) => raceModels.lagoonRock(i % 2), p: 0.05, near: [6, 22], scale: [0.7, 1.1], big: true, solid: SOLID.lagoonRock },
-        { build: (i) => hubModels.bush(i % 3), p: 0.3, near: [2.5, 14], scale: [0.9, 1.4], big: true },
+        { build: (i) => hubModels.bush(i % 3), p: 0.3, near: [2.5, 14], scale: [0.9, 1.4], big: true, shared: true },
         { build: () => hubModels.grass(), p: 0.9, near: [1.5, 18], scale: [1.2, 2], big: false },
         { build: () => hubModels.flowerTuft(), p: 0.35, near: [2, 12], scale: [1, 1.5], big: false }
       ],
@@ -340,6 +342,19 @@
     const n = S.count;
     const root = createNode();
     const geometries = [];
+    // The renderer batches ordinary nodes sharing a geometry and culls each placement. Keeping the
+    // detailed foliage shared avoids copying hundreds of thousands of faces into the sector meshes.
+    const sharedDecor = new Map();
+    const decorGeometry = (geo) => {
+      let shared = sharedDecor.get(geo);
+      if (!shared) {
+        // Baking kept these props still, so retain that appearance when sharing their original mesh.
+        shared = { ...geo, sway: 0 };
+        sharedDecor.set(geo, shared);
+        geometries.push(shared);
+      }
+      return shared;
+    };
     const keep = (geo) => {
       if (geo.normals) {
         while (geo.normals.length < geo.verts.length) geo.normals.push(0);
@@ -511,7 +526,7 @@
     for (let s = 0; s < sectorCount; s++) {
       const from = s * perSector, to = Math.min(n, from + perSector);
       if (from >= n) break;
-      const road = geometry(), big = geometry(), small = geometry(), walls = big;
+      const road = geometry(), big = geometry(), small = geometry(), walls = big, decor = [];
       road.castShadow = false;
       const rows = [];
       for (let i = from; i <= to; i++) {
@@ -651,7 +666,9 @@
             if (Math.abs(dx * rightX(j) + dz * rightZ(j)) < halfAt(j) + CURB_W + SHOULDER * 0.5 + kind.near[0] * 0.5 + solid && Math.hypot(dx, dz) < halfAt(j) + CURB_W + kind.near[0] * 0.5 + solid) continue;
             if (waterAt(x, z)) continue;
             const y = groundAt(x, z) - 0.08;
-            bake(kind.big ? big : small, kind.build(Math.floor(rand() * 3)), x, y, z, rand() * Math.PI * 2, scale);
+            const geo = kind.build(Math.floor(rand() * 3)), yaw = rand() * Math.PI * 2;
+            if (kind.shared) decor.push(createNode({ geometry: decorGeometry(geo), position: { x, y, z }, rotation: { x: 0, y: yaw, z: 0 }, scale: { x: scale, y: scale, z: scale } }));
+            else bake(kind.big ? big : small, geo, x, y, z, yaw, scale);
             if (solid > 0 && props.count < PROP_CAP) {
               props.x[props.count] = x;
               props.z[props.count] = z;
@@ -690,7 +707,7 @@
       cy /= to - from;
       const node = createNode();
       const nodes = { road: createNode({ geometry: keep(road) }), big: createNode({ geometry: keep(big) }), small: createNode({ geometry: keep(small) }) };
-      addChild(node, nodes.road, nodes.big, nodes.small);
+      addChild(node, nodes.road, nodes.big, nodes.small, ...decor);
       addChild(root, node);
       sectors.push({ node, nodes, from, to, cx, cy, cz, propFrom, propTo: props.count });
       sectorProps.push(propFrom);
@@ -781,7 +798,7 @@
       }
       geometries.push(raceModels.torchStand(), raceModels.torchFlame());
     }
-    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
+    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), cos: new Float32Array(SPECTATOR_CAP), sin: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
     const standsGeo = geometry();
     if (theme.spectators) {
       const spots = [];
@@ -817,7 +834,11 @@
         spectators.x[i] = spots[i].x;
         spectators.y[i] = spots[i].y;
         spectators.z[i] = spots[i].z;
+        // The yaw is fixed at spawn, so its cos and sin are too - computed from the stored float32 yaw,
+        // the very value the per-frame write used to re-derive them from.
         spectators.yaw[i] = spots[i].yaw;
+        spectators.cos[i] = Math.cos(spectators.yaw[i]);
+        spectators.sin[i] = Math.sin(spectators.yaw[i]);
         spectators.phase[i] = rand() * Math.PI * 2;
       }
       spectators.count = count;
@@ -929,7 +950,7 @@
         const data = spectators.node.instanceData;
         for (let i = 0; i < spectators.count; i++) {
           const hop = Math.max(0, Math.sin(elapsed * 6 + spectators.phase[i])) * 0.18;
-          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1);
+          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1, spectators.cos[i], spectators.sin[i]);
         }
         spectators.node.instanceVersion++;
       }
@@ -943,6 +964,7 @@
       for (const child of root.children.slice()) removeChild(root, child);
       for (const geo of geometries) renderer.releaseGeometry(geo);
       geometries.length = 0;
+      sharedDecor.clear();
       sectors.length = 0;
       terrainNodes.length = 0;
       torches.length = 0;

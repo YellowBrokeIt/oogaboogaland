@@ -3,16 +3,46 @@
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math, { boundsOf } = BL.scene;
   const UP = { x: 0, y: 1, z: 0 }, VERTICES = 64, FRAGMENTS = 1024, EPS = 1e-10;
-  const meshes = new WeakMap();
-  const meshOf = (geometry) => {
+  const meshes = new WeakMap(), sourceVertices = new WeakMap();
+  const meshOf = (geometry, trackSource = false) => {
     let mesh = meshes.get(geometry);
-    if (mesh) return mesh;
+    // A direct bake can precede the first wrapper alias attempt. Record the
+    // snapshot lazily so a later wrapper can still share this source's bake.
+    if (mesh) {
+      if (trackSource && !sourceVertices.has(geometry)) sourceVertices.set(geometry, new Float64Array(mesh.vertices));
+      return mesh;
+    }
+    // Cave ownership changes material tags, not triangle topology. Reuse the
+    // immutable source bake across visits only when every index array agrees.
+    const source = geometry.matrixSourceGeometry;
+    if (source && !source.matrixSourceGeometry && source !== geometry && source.verts === geometry.verts && source.faces.length === geometry.faces.length) {
+      let same = true;
+      for (let i = 0; i < source.faces.length; i++) if (source.faces[i].i !== geometry.faces[i].i || source.faces[i].visibility !== geometry.faces[i].visibility) { same = false; break; }
+      if (same) {
+        mesh = meshOf(source, true);
+        const snapshot = sourceVertices.get(source);
+        same = !!snapshot && snapshot.length === source.verts.length;
+        for (let i = 0; same && i < snapshot.length; i++) if (snapshot[i] !== source.verts[i]) same = false;
+        // A source's faces can be replaced between visits. Do not alias an old
+        // bake merely because the new wrapper agrees with the new source.
+        let at = 0;
+        for (let f = 0; same && f < source.faces.length; f++) {
+          if (source.faces[f].visibility === false) continue;
+          const indices = source.faces[f].i;
+          for (let i = 1; same && i + 1 < indices.length; i++) {
+            same = mesh.indices[at++] === indices[0] * 3
+              && mesh.indices[at++] === indices[i] * 3 && mesh.indices[at++] === indices[i + 1] * 3;
+          }
+        }
+        if (same && at === mesh.indices.length && mesh.vertices === source.verts) { meshes.set(geometry, mesh); return mesh; }
+      }
+    }
     const vertices = geometry.verts, nodes = [];
     let count = 0;
-    for (const face of geometry.faces) if (face.i.length > 2) count += face.i.length - 2;
+    for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) count += face.i.length - 2;
     const indices = new Uint32Array(count * 3), boxes = new Float64Array(count * 6), order = new Uint32Array(count);
     let n = 0;
-    for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
+    for (const face of geometry.faces) if (face.visibility !== false) for (let i = 1; i + 1 < face.i.length; i++) {
       const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
       indices[n * 3] = a; indices[n * 3 + 1] = b; indices[n * 3 + 2] = c; order[n] = n;
       for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis] = Math.min(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
@@ -45,6 +75,7 @@
     };
     if (count) build(0, count, -1);
     mesh = { vertices, indices, order, nodes };
+    if (trackSource) sourceVertices.set(geometry, new Float64Array(vertices));
     meshes.set(geometry, mesh); return mesh;
   };
   const create = ({ root, renderer, camera, occluded = null, renderOpts = null }) => {
@@ -161,8 +192,12 @@
     const visit = (node) => {
       if (!node.visible || node.cameraHidden) return;
       const geometry = node.geometry;
-      // Smoke is translucent; guide lines and glyph effects do not cover UI.
-      if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !node.mirrorPortal && !(node.smokeOpacity < 1) && !(renderOpts?.birdsEyeCutaway && geometry.cutawayHide)) {
+      // Smoke and phase fields are translucent; their effects do not cover UI. Surface overlays (`surfaceOverlay`: the
+      // path's 25k tiles, banner marks, totem paint) lie on a backing that already covers whatever they would. Not every
+      // `depthOffset` geometry is one: the ₿IFRÖST arch's stone takes the offset only to win its joins with the ridge.
+      if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !geometry.surfaceOverlay
+        && !geometry.mirrorRippleOnly && !node.mirrorRippleOnly && !node.mirrorPortal
+        && !(node.smokeOpacity < 1) && !(renderOpts?.birdsEyeCutaway && geometry.cutawayHide)) {
         if (node.instanceData) {
           const data = node.instanceData, count = node.drawInstanceCount === undefined ? node.instanceCount : Math.min(node.instanceCount, node.drawInstanceCount);
           for (let i = 0; i < count; i++) if (data[i * 20 + 18] >= -1) add(node, data, i * 20, i);
@@ -372,13 +407,15 @@
       return false;
     };
     let headMinX = Infinity, headMaxX = -Infinity, headTop = Infinity;
+    // The head's own vertices, not its bounding-box corners: seen from above, a box's far top corner (pushed back by
+    // the nose, beard and hair) projects well above the skull and left a gap under the name and speech.
     const projectHead = (node) => {
       if (!node.visible || node.cameraHidden) return;
       const entry = records.get(node)?.[0];
       if (entry && entry.frame === frame) {
-        const b = entry.bounds, m = entry.camera;
-        for (let i = 0; i < 8; i++) {
-          const x = i & 1 ? b.max[0] : b.min[0], y = i & 2 ? b.max[1] : b.min[1], z = i & 4 ? b.max[2] : b.min[2];
+        const v = entry.geometry.verts, m = entry.camera;
+        for (let i = 0; i < v.length; i += 3) {
+          const x = v[i], y = v[i + 1], z = v[i + 2];
           const depth = -(m[2] * x + m[6] * y + m[10] * z + m[14]);
           if (depth < near) continue;
           const span = projectionDepth(depth);
@@ -432,16 +469,17 @@
       result.x = Math.max(0, Math.min(width, result.x)); result.y = Math.max(0, Math.min(height, result.y));
       return result;
     };
-    // Builds every blocker's mesh ahead in idle slices, so a view that brings many into play at once never builds them
-    // all in one frame: the same meshes `meshOf` would build then, shared across visits. A slice builds only what the
-    // idle time left can hold at the rate measured so far on this device.
-    let warming = 0, msPerTriangle = 0;
+    // Warm small meshes within the idle budget. A large synchronous BVH build
+    // cannot be interrupted, so leave it to the exact on-demand path rather than
+    // starting seconds of work in an idle callback between scene frames.
+    let warming = 0, msPerTriangle = 0.01;
     const warm = () => {
       if (warming || typeof requestIdleCallback === "undefined") return;
       const pending = [];
       const collect = (node) => {
         const geometry = node.geometry;
-        if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !node.mirrorPortal && !meshes.has(geometry)) pending.push(geometry);
+        if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph
+          && !geometry.mirrorRippleOnly && !node.mirrorRippleOnly && !node.mirrorPortal && !meshes.has(geometry)) pending.push(geometry);
         for (const child of node.children) collect(child);
       };
       collect(root);
@@ -451,8 +489,10 @@
           const geometry = pending[pending.length - 1];
           if (meshes.has(geometry)) { pending.pop(); continue; }
           let triangles = 0;
-          for (const face of geometry.faces) if (face.i.length > 2) triangles += face.i.length - 2;
-          if (triangles * msPerTriangle + 1 > deadline.timeRemaining()) break;
+          for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
+          const estimated = triangles * msPerTriangle + 1;
+          if (estimated > 8) { pending.pop(); continue; }
+          if (estimated > deadline.timeRemaining()) break;
           const start = performance.now();
           meshOf(geometry);
           pending.pop();

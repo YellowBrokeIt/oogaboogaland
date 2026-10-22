@@ -26,6 +26,9 @@
     return { tier, item: pool[fnv1a(`${donation.id}/loot`) % pool.length] };
   };
   const bananasFor = (sats) => Math.max(1, Math.min(12, Math.round(sats / SATS_PER_BANANA)));
+  // The donations board's tally keeps the sats and bananas of each of the last TIP_DAYS local days, by day number.
+  const TIP_DAYS = 7, DAY_MS = 864e5, DONOR_MAX = 256, RECENT_HANDLES = 12;
+  const dayOf = (at) => Math.floor((at - new Date(at).getTimezoneOffset() * 6e4) / DAY_MS);
   const LARGE_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
   const formatLarge = (n) => {
     const unit = LARGE_UNITS.find(([size]) => n >= size);
@@ -33,9 +36,30 @@
     const v = n / unit[0];
     return `${v < 10 ? (Math.floor(v * 10) / 10).toFixed(1).replace(/\.0$/, "") : Math.floor(v)}${unit[1]}`;
   };
+  const formatThree = (n, compact = false) => {
+    if (!Number.isFinite(n)) return "-";
+    const rounded = Number(n.toPrecision(3));
+    const unit = compact ? LARGE_UNITS.find(([size]) => Math.abs(rounded) >= size) : null;
+    const value = unit ? rounded / unit[0] : rounded;
+    const places = value === 0 ? 2 : Math.max(0, 2 - Math.floor(Math.log10(Math.abs(value))));
+    return `${value.toFixed(places)}${unit ? unit[1] : ""}`;
+  };
+  const formatFeeRate = (n) => {
+    if (!(n > 0 && n < 1)) return formatThree(n);
+    const rounded = Number(n.toPrecision(2));
+    return rounded.toFixed(Math.max(0, 1 - Math.floor(Math.log10(rounded))));
+  };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
+  const addRecentHandle = (list, raw) => {
+    const handle = BL.donations.sanitize(raw, HANDLE_MAX).replace(/^@+/, "").trim();
+    if (!handle || handle.toLowerCase() === "anon") return;
+    const at = list.findIndex((entry) => entry.toLowerCase() === handle.toLowerCase());
+    if (at >= 0) list.splice(at, 1);
+    list.unshift(handle);
+    if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
+  };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -62,8 +86,33 @@
       }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
-      for (const key of ["handFed", "totalSats", "donations"]) {
+      for (const key of ["handFed", "totalSats", "donations", "lastTip"]) {
         if (Number.isFinite(parsed[key]) && parsed[key] >= 0) state[key] = Math.floor(parsed[key]);
+      }
+      if (Number.isFinite(parsed.bananas) && parsed.bananas >= 0) state.bananas = parsed.bananas;
+      if (Array.isArray(parsed.donors)) {
+        for (const d of parsed.donors.slice(0, DONOR_MAX)) {
+          if (!d || !isString(d.handle, HANDLE_MAX) || !Number.isSafeInteger(d.sats) || d.sats < 0
+            || !Number.isFinite(d.bananas) || d.bananas < 0) continue;
+          const handle = BL.donations.sanitize(d.handle, HANDLE_MAX);
+          if (!state.donors.some((entry) => entry.handle.toLowerCase() === handle.toLowerCase())) state.donors.push({ handle, sats: d.sats, bananas: d.bananas });
+        }
+      }
+      if (Array.isArray(parsed.recentHandles)) {
+        for (const handle of parsed.recentHandles.slice(0, RECENT_HANDLES).reverse()) if (isString(handle, HANDLE_MAX)) addRecentHandle(state.recentHandles, handle);
+      } else for (const donor of state.donors.slice(-RECENT_HANDLES)) addRecentHandle(state.recentHandles, donor.handle);
+      if (Array.isArray(parsed.recentDonations)) for (const d of parsed.recentDonations.slice(0, BL.donations.RECENT_MAX)) {
+        if (!d || !isString(d.id, 64) || !d.id || !Number.isSafeInteger(d.sats) || !isString(d.handle, HANDLE_MAX)
+          || !isString(d.message, MESSAGE_MAX) || !Number.isFinite(d.at) || d.at < 0 || !Number.isFinite(d.bananas) || d.bananas < 0) continue;
+        state.recentDonations.push({ id: d.id, sats: d.sats, handle: BL.donations.sanitize(d.handle, HANDLE_MAX),
+          message: BL.donations.carried(d.sats, d.message), at: d.at, bananas: d.bananas });
+      }
+      // Each day's tally is [day, sats, bananas], the days rising; a malformed one is dropped alone.
+      if (Array.isArray(parsed.tipDays)) {
+        for (const d of parsed.tipDays.slice(-TIP_DAYS)) {
+          const last = state.tipDays[state.tipDays.length - 1];
+          if (Array.isArray(d) && d.length === 3 && Number.isInteger(d[0]) && d[0] >= 0 && Number.isInteger(d[1]) && d[1] >= 0 && Number.isFinite(d[2]) && d[2] >= 0 && (!last || d[0] > last[0])) state.tipDays.push(d.slice());
+        }
       }
       if (parsed.race && parsed.race.best && typeof parsed.race.best === "object") {
         for (const [track, b] of Object.entries(parsed.race.best)) {
@@ -142,10 +191,48 @@
       return entry ? catalog.find((c) => c.id === entry.itemId) : null;
     };
     const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
-    const recordDonation = (donation) => {
+    // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
+    // its day's sats and bananas. `counted` is the API's exact count in real mode; without it the game's own.
+    // A day already rolled out of the tally (a late replay) counts in the totals only.
+    const recordDonation = (donation, counted = null) => {
+      const bananas = counted === null ? bananasFor(donation.sats) : counted, day = dayOf(donation.at), days = state.tipDays;
       state.totalSats += donation.sats;
       state.donations += 1;
+      state.bananas += bananas;
+      state.lastTip = donation.sats;
+      // Local demo donors stay separate from the API's authoritative board. Older saves have no donor history.
+      if (counted === null) {
+        addRecentHandle(state.recentHandles, donation.handle);
+        // A message rides only a tip at or above the bar, whichever path handed the tip in.
+        state.recentDonations.unshift({ id: donation.id, sats: donation.sats, handle: BL.donations.sanitize(donation.handle, HANDLE_MAX),
+          message: BL.donations.carried(donation.sats, donation.message), at: donation.at, bananas });
+        if (state.recentDonations.length > BL.donations.RECENT_MAX) state.recentDonations.length = BL.donations.RECENT_MAX;
+        const handle = BL.donations.sanitize(donation.handle, HANDLE_MAX);
+        let donor = state.donors.find((entry) => entry.handle.toLowerCase() === handle.toLowerCase());
+        if (!donor && state.donors.length < DONOR_MAX) {
+          donor = { handle, sats: 0, bananas: 0 };
+          state.donors.push(donor);
+        }
+        if (donor) { donor.handle = handle; donor.sats += donation.sats; donor.bananas += bananas; }
+      }
+      let i = days.length - 1;
+      while (i >= 0 && days[i][0] > day) i--;
+      if (i >= 0 && days[i][0] === day) {
+        days[i][1] += donation.sats;
+        days[i][2] += bananas;
+      } else if (i >= 0 || days.length < TIP_DAYS) {
+        days.splice(i + 1, 0, [day, donation.sats, bananas]);
+        if (days.length > TIP_DAYS) days.shift();
+      }
       save(state);
+    };
+    const rememberHandle = (handle) => { addRecentHandle(state.recentHandles, handle); save(state); };
+    // This browser's tips over the last `days` local days, today included, as [sats, bananas].
+    const tipsWithin = (days, now = Date.now()) => {
+      const from = dayOf(now) - days + 1;
+      let sats = 0, bananas = 0;
+      for (const [day, s, b] of state.tipDays) if (day >= from) { sats += s; bananas += b; }
+      return [sats, bananas];
     };
     const recordHandFed = () => {
       state.handFed += 1;
@@ -265,7 +352,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
-  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
+  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

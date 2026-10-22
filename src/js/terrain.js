@@ -2,6 +2,40 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mulberry32, hexToRgb, clamp } = BL.math;
+  // Compact completed terrain positions without rounding collision or sight boundaries.
+  // Faces and lines retain their order and metadata; the first exact position owns each index.
+  // Positions are matched on their exact 64-bit patterns (so -0 stays apart from 0) in an open-addressed table,
+  // instead of a string key per vertex.
+  const compactVertices = (geometry) => {
+    const count = geometry.verts.length / 3, source = Float64Array.from(geometry.verts), bits = new Uint32Array(source.buffer);
+    const vertices = [], indices = new Uint32Array(count);
+    let size = 1;
+    while (size < count * 2) size *= 2;
+    const table = new Int32Array(size).fill(-1), mask = size - 1;
+    for (let v = 0; v < count; v++) {
+      const at = v * 6;
+      let hash = 0;
+      for (let k = 0; k < 6; k++) hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0;
+      let slot = (hash ^ hash >>> 15) & mask, index = -1;
+      for (;;) {
+        const first = table[slot];
+        if (first < 0) break;
+        const other = first * 6;
+        if (bits[other] === bits[at] && bits[other + 1] === bits[at + 1] && bits[other + 2] === bits[at + 2]
+          && bits[other + 3] === bits[at + 3] && bits[other + 4] === bits[at + 4] && bits[other + 5] === bits[at + 5]) { index = indices[first]; break; }
+        slot = slot + 1 & mask;
+      }
+      if (index < 0) {
+        index = vertices.length / 3;
+        table[slot] = v;
+        vertices.push(source[v * 3], source[v * 3 + 1], source[v * 3 + 2]);
+      }
+      indices[v] = index;
+    }
+    for (const face of geometry.faces) for (let i = 0; i < face.i.length; i++) face.i[i] = indices[face.i[i]];
+    for (const line of geometry.lines) for (let i = 0; i < line.i.length; i++) line.i[i] = indices[line.i[i]];
+    geometry.verts = new Float64Array(vertices);
+  };
   // Dense voxel grid; value 0 and out-of-bounds are both empty.
   const makeGrid = (sx, sy, sz) => {
     const data = new Uint8Array(sx * sy * sz);
@@ -262,7 +296,8 @@
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
   const STAIR_TERRACE = { from: MEADOW, top: 2.5, halfWidth: 1.8, blend: 1.5 };
-  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE };
+  // The final terrace is as wide as the Sphere's six-metre portal and bridge deck.
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE, halfWidth: 3 };
   const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
   // Deeper treads keep the diagonal voxel risers within an Ooga's step clearance. Reach the full height
   // half a metre before the bridge so its underside cannot block the final rise onto the deck.
@@ -275,7 +310,8 @@
     verts: [-PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, PATH_UNIT / 2, -PATH_UNIT / 2, 0, PATH_UNIT / 2],
     faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
     lines: [],
-    depthOffset: true
+    depthOffset: true,
+    surfaceOverlay: true
   };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
   const undersideDepthAt = (radius) => Math.max(0, UNDER_SPHERE_CENTER + Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - radius * radius)));
@@ -401,8 +437,9 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const island = ({ seed = 1 } = {}) => {
-    const hit = ISLANDS.get(seed);
+  const island = ({ seed = 1, roofHole = null } = {}) => {
+    const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+    const hit = ISLANDS.get(cacheKey);
     if (hit) return hit;
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
@@ -1918,6 +1955,21 @@
       return poolAlong + radius >= POOL_APPROACH.from - 1 && poolAlong - radius <= POOL_APPROACH.to + 0.5
         && Math.abs(x * POOL_Z - z * POOL_X) <= POOL_APPROACH.halfWidth + POOL_APPROACH.blend + radius;
     };
+    const stairAt = (x, y, z) => {
+      const i = column(x, z);
+      if (i < 0) return false;
+      if (rampCells[i] && Math.abs(rampFloorAt(x, z) - y) <= UNIT + 0.05) return true;
+      if (Math.abs(surfaceAt(x, z) - y) > UNIT + 0.05) return false;
+      if (Math.abs(x) < PASS_HALF && z < -MEADOW && z > -RADIUS) return true;
+      if (z >= STAIR_TERRACE.from - 1 && z <= STAIR_TERRACE.from + STAIR_TERRACE.top * 2 + 1
+        && Math.abs(x) < STAIR_TERRACE.halfWidth + STAIR_TERRACE.blend) return true;
+      const timechainAlong = x * TIMECHAIN_X + z * TIMECHAIN_Z;
+      if (timechainAlong >= TIMECHAIN.from - 1 && timechainAlong <= TIMECHAIN.from + TIMECHAIN.top * 2 + 1
+        && Math.abs(x * TIMECHAIN_Z - z * TIMECHAIN_X) < TIMECHAIN.halfWidth + TIMECHAIN.blend) return true;
+      const poolAlong = x * POOL_X + z * POOL_Z;
+      return poolAlong >= POOL_APPROACH.from - 1 && poolAlong <= POOL_APPROACH.to + 0.5
+        && Math.abs(x * POOL_Z - z * POOL_X) < POOL_APPROACH.halfWidth + POOL_APPROACH.blend;
+    };
     // Walking centerlines reuse the rendered path mask's bends; master curves stay fixed and navigation clips
     // them to the growing ring.
     const centerlines = spokes.map((s) => {
@@ -2069,6 +2121,16 @@
     const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
       floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
       cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings });
+    let roofOpening = null;
+    const roofMouth = roofHole && mouths.find(m => m.id === roofHole.id);
+    if (roofMouth) {
+      const sr = Math.sin(roofMouth.ry), cr = Math.cos(roofMouth.ry);
+      const x = roofMouth.x + cr * roofHole.x + sr * roofHole.z, z = roofMouth.z - sr * roofHole.x + cr * roofHole.z;
+      const top = surfaceAt(x, z);
+      roofOpening = { x, z, radius: roofHole.radius, y: top - 0.4, bottom: top - 1.3 };
+      // A centimetre of clearance hides the voxel edge behind the rotated iron liner.
+      BL.models.cutCylinder(geometry, x, z, roofHole.radius + 0.01, roofOpening.bottom);
+    }
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
     for (const v of rampGeometry.verts) geometry.verts.push(v);
@@ -2081,6 +2143,8 @@
         cutawayPathKey: pathKey, cutawayPathBottom: pathKey ? cutawayPathBottoms[cutawayColumn] : undefined,
         cutawayWindowMask: birdseyeWindowMask[cutawayColumn], cutawayWindowColumn: birdseyeWindowMask[cutawayColumn] ? cutawayColumn : -1 });
     }
+    // Every ramp and window is appended before indices are compacted for the consumers below.
+    compactVertices(geometry);
     const rockCaves = compactCaveLabels(matrixCaves, geometry, grid, UNIT, ORIGIN);
     matrixCaves = null;
     // Four half-spaces give each continuous ramp's triangular footprint and sloping top; its column supplies the
@@ -2220,9 +2284,32 @@
     // most columns hold neither, so rays cross them on voxels alone.
     const sightColumnWork = new Uint8Array(SX * SZ);
     for (let i = 0; i < SX * SZ; i++) if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1;
-    const sightClearAt = (x, y, z, toX, toY, toZ) => {
+    const sightCacheStats = { queries: 0, hits: 0 };
+    const sightClearAt = (x, y, z, toX, toY, toZ, witness = null, slot = 0) => {
       const dx = toX - x, dy = toY - y, dz = toZ - z;
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-12) return rockMaterialAt(x, y, z) === null;
+      if (witness) {
+        sightCacheStats.queries++;
+        const at = witness[slot];
+        // Only actual, still-occupied voxels certify a hit. Shrink the cell and require a positive
+        // interval well above the DDA tolerance: tangencies, tiny spans and partial rock fall through.
+        // Rechecking occupancy and the current segment makes this independent of camera/terrain epochs.
+        if (at >= 0 && at < data.length && data[at]) {
+          const gz = at % SZ, gy = Math.floor(at / SZ) % SY, gx = Math.floor(at / (SY * SZ));
+          let enter = 0, exit = 1;
+          for (let axis = 0; axis < 3 && enter < exit; axis++) {
+            const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz;
+            const min = (axis === 0 ? ORIGIN.x + gx * UNIT : axis === 1 ? ORIGIN.y + gy * UNIT : ORIGIN.z + gz * UNIT) + UNIT * 1e-7, max = min + UNIT * (1 - 2e-7);
+            if (!speed) { if (start <= min || start >= max) exit = enter; }
+            else {
+              const a = (min - start) / speed, b = (max - start) / speed;
+              enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
+            }
+          }
+          if (exit - enter > 1e-7) { sightCacheStats.hits++; return false; }
+        }
+        witness[slot] = -1;
+      }
       let lo = 0, hi = 1;
       for (let axis = 0; axis < 3; axis++) {
         const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz, min = axis === 0 ? ORIGIN.x : axis === 1 ? ORIGIN.y : ORIGIN.z, max = min + (axis === 0 ? SX : axis === 1 ? SY : SZ) * UNIT;
@@ -2240,7 +2327,10 @@
       for (let step = 0; step < SX + SY + SZ + 3; step++) {
         const end = Math.min(tx, ty, tz, hi), column = gx * SZ + gz;
         if (end > t + 1e-12) {
-          if (data[(gx * SY + gy) * SZ + gz]) return false;
+          if (data[(gx * SY + gy) * SZ + gz]) {
+            if (witness) witness[slot] = (gx * SY + gy) * SZ + gz;
+            return false;
+          }
           if (column !== previousColumn && sightColumnWork[column]) {
             const columnEnd = Math.min(tx, tz, hi), a = y + dy * t, b = y + dy * columnEnd, minY = Math.min(a, b), maxY = Math.max(a, b), pieces = windowColumns[column];
             if (pieces) for (const piece of pieces) {
@@ -2248,8 +2338,10 @@
               if (sightConvexHit(windowSightPlanes, piece.sightOffset, piece.sightCount, x, y, z, dx, dy, dz, t, columnEnd, windowSightRefs)) return false;
             }
             for (let layer = 0; layer < 2; layer++) {
-              const range = layer ? basementCollision[column] : rampCollision[column], base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
-              if (!range || maxY <= base + 1e-9) continue;
+              const range = layer ? basementCollision[column] : rampCollision[column];
+              if (!range) continue;
+              const base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
+              if (maxY <= base + 1e-9) continue;
               const bottom = dy ? (base - y) / dy : 0, start = dy > 0 ? Math.max(t, bottom) : t, finish = dy < 0 ? Math.min(columnEnd, bottom) : columnEnd;
               if (start >= finish - 1e-12) continue;
               for (let n = 0; n < (range & 3); n++) {
@@ -2262,10 +2354,9 @@
           }
         }
         if (end >= hi - 1e-12) break;
-        if (tx <= end + 1e-12) { gx += sx; tx += stepX; }
-        if (ty <= end + 1e-12) { gy += sy; ty += stepY; }
-        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; }
-        if (gx < 0 || gx >= SX || gy < 0 || gy >= SY || gz < 0 || gz >= SZ) break;
+        if (tx <= end + 1e-12) { gx += sx; tx += stepX; if (gx < 0 || gx >= SX) break; }
+        if (ty <= end + 1e-12) { gy += sy; ty += stepY; if (gy < 0 || gy >= SY) break; }
+        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; if (gz < 0 || gz >= SZ) break; }
         t = end;
       }
       return true;
@@ -2340,6 +2431,7 @@
     };
     const built = {
       geometry,
+      roofOpening,
       // Shared construction data is read-only to rendering. The cap builder
       // fills only actual solid cells and the continuous window/ramp remnants.
       cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns, cutawayPaths,
@@ -2364,6 +2456,7 @@
       rockCaveAt,
       rockCaveBytes: rockCaves.bytes,
       sightClearAt,
+      sightCacheStats,
       sightBoxClearAt,
       sightBoxSolidAt,
       sightGrid: new Float64Array([UNIT, ORIGIN.x, ORIGIN.y, ORIGIN.z]),
@@ -2371,6 +2464,7 @@
       windowPiecesAt: (x, z) => windowColumns[column(x, z)],
       isPath,
       overlapsStairs,
+      stairAt,
       isGrassAt,
       onLand,
       mouths,
@@ -2384,8 +2478,8 @@
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(seed, built);
+    ISLANDS.set(cacheKey, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
+  BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
 })();

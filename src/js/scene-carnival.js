@@ -36,7 +36,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models, hud: hudMod, interact: interactMod, fx: fxMod } = BL;
-  const AM = BL.arcadeModels, AG = BL.arcadeGames, RG = BL.retroGames;
+  // The games' rules (arcadeGames, retroGames) and sound are deferred on a hosted page: each game is read when played.
+  const AM = BL.arcadeModels;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
   const { HALL, LAYOUT } = AM;
 
@@ -52,27 +53,27 @@
   // to bring its boards down under them, and hoop shot's (its boards) and the claw's (the claw along the case's top)
   // tilt up a little to do the same.
   const KINDS = {
-    skee: { make: AG.skeeball, spots: LAYOUT.skee, parts: () => AM.skeeLane(), eye: [0, 2.2, 2.3], look: [0, 1.3, -5], tallEye: [0, 1.6, 1.8], tallLook: [0, 1.65, -6.25], crowd: [[[-2.7, -4.6], [3.3, -4.6]], [[2.7, -4.6], [-3.3, -4.6]]], tall: [[[-1.2, -6.6], [-1.8, -9]], [[1.2, -6.6], [1.8, -9]]], coconut: 2.4 },
-    hoops: { make: AG.hoopShot, spots: LAYOUT.hoops, parts: () => AM.hoopMachine(), eye: [0, 2, 1.9], look: [0, 2.35, -3.1], tallLook: [0, 2.6, -3.1], crowd: [[[-3.2, -3.3], [-2.4, -3]], [[-1.0, 2.2], [0.3, 2.8]]], coconut: 2 },
-    shy: { make: AG.coconutShy, spots: [LAYOUT.shy], parts: () => ({ ...AM.coconutShy() }), eye: [0, 2, 2.8], look: [0, 1.5, -3.4], tallEye: [0, 2.6, 5.6], tallLook: [0, 2.45, -3.4], crowd: [[[-2.4, -2.75], [2.4, -3.2]]], coconut: 1.8 },
+    skee: { get make() { return BL.arcadeGames.skeeball; }, spots: LAYOUT.skee, parts: () => AM.skeeLane(), eye: [0, 2.2, 2.3], look: [0, 1.3, -5], tallEye: [0, 1.6, 1.8], tallLook: [0, 1.65, -6.25], crowd: [[[-2.7, -4.6], [3.3, -4.6]], [[2.7, -4.6], [-3.3, -4.6]]], tall: [[[-1.2, -6.6], [-1.8, -9]], [[1.2, -6.6], [1.8, -9]]], coconut: 2.4 },
+    hoops: { get make() { return BL.arcadeGames.hoopShot; }, spots: LAYOUT.hoops, parts: () => AM.hoopMachine(), eye: [0, 2, 1.9], look: [0, 2.35, -3.1], tallLook: [0, 2.6, -3.1], crowd: [[[-3.2, -3.3], [-2.4, -3]], [[-1.0, 2.2], [0.3, 2.8]]], coconut: 2 },
+    shy: { get make() { return BL.arcadeGames.coconutShy; }, spots: [LAYOUT.shy], parts: () => ({ ...AM.coconutShy() }), eye: [0, 2, 2.8], look: [0, 1.5, -3.4], tallEye: [0, 2.6, 5.6], tallLook: [0, 2.45, -3.4], crowd: [[[-2.4, -2.75], [2.4, -3.2]]], coconut: 1.8 },
     // Under the mezzanine, so the countdown's wide view starts low and further back. Its boards and the machines
     // beside it fill the view, so its watchers stand behind the player, in the wide shot's lower corners.
-    claw: { make: AG.clawGame, spots: LAYOUT.frames.claw, parts: (i) => AM.clawBooth(i), eye: [0, 1.85, 1.05], look: [0, 1.45, -1], tallLook: [0, 1.5, -1], wide: [0, 0.4, 3.2], crowd: [[[-1.6, 1.4], [2, 1.3]]], coconut: 0.9 },
+    claw: { get make() { return BL.arcadeGames.clawGame; }, spots: LAYOUT.frames.claw, parts: (i) => AM.clawBooth(i), eye: [0, 1.85, 1.05], look: [0, 1.45, -1], tallLook: [0, 1.5, -1], wide: [0, 0.4, 3.2], crowd: [[[-1.6, 1.4], [2, 1.3]]], coconut: 0.9 },
     // The table runs away from the player, turned a quarter onto its length; an Ooga plays the far end.
     // Held keys sweep its mallet across at `steer` a second (a full sweep in a third of one, as quick as a drag), and
     // the HUD's third box shows the sand left under `need`. On a tall screen the view stands further back and higher,
     // so the whole table and the YOU and OOGA boards over its far end show below the HUD's cards.
-    hockey: { make: AG.airHockey, spots: LAYOUT.frames.hockey, parts: () => { const a = AM.airHockey(); return { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }; }, eye: [0, 1.7, 0.55], look: [0, 0.7, -2.1], tallEye: [0, 2.85, 1.5], tallLook: [0, 0.3, -3.65], wide: [0, 0.6, 3], rival: -3.4, crowd: [[[-2.4, -1.2], [-2.6, -4.6]], [[2.2, -2.0], [2.4, -3.6]], [[-2.2, -2.0], [-2.4, -3.6]]], coconut: 1.3, steer: 6, need: "Sand" },
+    hockey: { get make() { return BL.arcadeGames.airHockey; }, spots: LAYOUT.frames.hockey, parts: () => { const a = AM.airHockey(); return { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }; }, eye: [0, 1.7, 0.55], look: [0, 0.7, -2.1], tallEye: [0, 2.85, 1.5], tallLook: [0, 0.3, -3.65], wide: [0, 0.6, 3], rival: -3.4, crowd: [[[-2.4, -1.2], [-2.6, -4.6]], [[2.2, -2.0], [2.4, -3.6]], [[-2.2, -2.0], [-2.4, -3.6]]], coconut: 1.3, steer: 6, need: "Sand" },
     // On a tall screen the table stands on end: the view looks down its length from over its head end, behind the
     // cue coconut's spot, so the cue points away up the table.
-    billiards: { make: AG.poolGame, spots: LAYOUT.frames.pool, parts: (i) => { const t = AM.poolTable(i); return { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }; }, eye: [0, 2.45, 0.35], look: [0, 0.75, -1.45], tallEye: [-3.05, 3.55, -1.35], tallLook: [-0.05, 0.62, -1.35], wide: [0, 1, 3], crowd: [[[-4.2, -3.4], [4.2, -3.6]], [[4.2, -3.6], [-4.2, -3.4]]], coconut: 1 },
+    billiards: { get make() { return BL.arcadeGames.poolGame; }, spots: LAYOUT.frames.pool, parts: (i) => { const t = AM.poolTable(i); return { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }; }, eye: [0, 2.45, 0.35], look: [0, 0.75, -1.45], tallEye: [-3.05, 3.55, -1.35], tallLook: [-0.05, 0.62, -1.35], wide: [0, 1, 3], crowd: [[[-4.2, -3.4], [4.2, -3.6]], [[4.2, -3.6], [-4.2, -3.4]]], coconut: 1 },
     // The board's hide fills this view and the pinball's and the pool table's are close and steep, so their watchers
     // stand just outside the play and show in the countdown's wide shot and round the results. On a tall screen the
     // darts view stands back far enough to show the whole board, the doubles at its sides and their numbers, and the
     // pinball view looks down on the table from over its front, so both walls, the flippers and the shooter lane fit
     // between the HUD's cards and the meter.
-    darts: { make: AG.dartsGame, spots: LAYOUT.frames.darts, parts: () => ({ body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }), eye: [0.05, 1.72, -1.05], look: [0, 1.73, -2.37], tallEye: [0.03, 1.72, -0.68], tallLook: [0, 1.73, -2.37], wide: [0, 0.2, 2.2], crowd: [[[-1.5, -1.0], [1.5, -1.0]]], coconut: 0.55 },
-    pinball: { make: AG.pinballGame, spots: LAYOUT.frames.pinball, parts: (i) => { const t = AM.pinball(i); return { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }; }, eye: [0, 1.75, 0.3], look: [0, 1.1, -1.05], tallEye: [0, 2.8, 0.15], tallLook: [0, 0.95, -1], wide: [0, 0.8, 2.8], crowd: [[[-1.4, 1.4], [1.2, 1.5]], [[1.3, 1.0], [1.9, 0.3]]], coconut: 0.6 },
+    darts: { get make() { return BL.arcadeGames.dartsGame; }, spots: LAYOUT.frames.darts, parts: () => ({ body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }), eye: [0.05, 1.72, -1.05], look: [0, 1.73, -2.37], tallEye: [0.03, 1.72, -0.68], tallLook: [0, 1.73, -2.37], wide: [0, 0.2, 2.2], crowd: [[[-1.5, -1.0], [1.5, -1.0]]], coconut: 0.55 },
+    pinball: { get make() { return BL.arcadeGames.pinballGame; }, spots: LAYOUT.frames.pinball, parts: (i) => { const t = AM.pinball(i); return { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }; }, eye: [0, 1.75, 0.3], look: [0, 1.1, -1.05], tallEye: [0, 2.8, 0.15], tallLook: [0, 0.95, -1], wide: [0, 0.8, 2.8], crowd: [[[-1.4, 1.4], [1.2, 1.5]], [[1.3, 1.0], [1.9, 0.3]]], coconut: 0.6 },
     // On the ride itself: the visitor's Ooga rides the beast, and the camera stands behind it, high and well off its
     // right shoulder, so the rider, the beast under it and the beat pole ahead all show: the pole up past the rider's
     // head, clear of the widest hair and hats even as the rider pops up on a slam, the head over the callouts, and the
@@ -80,7 +81,7 @@
     // so the pole shows under the callouts and the rider under it, above the meter. The front ride stands by the hall's
     // front wall, so both its watchers stand on the view's other side. A tall screen's view is all rider, beast and
     // beat pole, so the watchers keep to the countdown's wide shot there.
-    ride: { make: AG.rideGame, spots: LAYOUT.frames.ride, parts: (i) => ({ body: AM.ride(i).base }), eye: [-2.2, 2.9, -2.5], look: [0.3, 1.1, 0.4], tallEye: [-0.9, 7, -4], tallLook: [0.05, 1.6, 1.3], wide: [0, 1.6, -2.2], crowd: [[[-2.4, 3.2], [-1.3, 2.9]], [[-2.2, 3.2], [2.2, 3.2]], [[-2.2, 3.2], [2.2, 3.2]], [[-2.2, 3.2], [2.2, 3.2]]], coconut: 1.3 }
+    ride: { get make() { return BL.arcadeGames.rideGame; }, spots: LAYOUT.frames.ride, parts: (i) => ({ body: AM.ride(i).base }), eye: [-2.2, 2.9, -2.5], look: [0.3, 1.1, 0.4], tallEye: [-0.9, 7, -4], tallLook: [0.05, 1.6, 1.3], wide: [0, 1.6, -2.2], crowd: [[[-2.4, 3.2], [-1.3, 2.9]], [[-2.2, 3.2], [2.2, 3.2]], [[-2.2, 3.2], [2.2, 3.2]], [[-2.2, 3.2], [2.2, 3.2]]], coconut: 1.3 }
   };
   // The mezzanine's cabinets, each a scene playing its retro game (`retro-games.js`): the machine is the cabinet where
   // it stands on the deck (its frame carries `y`), and the game paints the one shared screen canvas, which `drawScreen`
@@ -94,7 +95,7 @@
   for (const c of AM.CABINETS) if (c.retro >= 0) {
     const id = AM.RETRO[c.retro].id;
     KINDS[id] = {
-      make: RG[id], spots: [c], retro: c, parts: () => ({ body: AM.cabinet(c.index) }),
+      get make() { return BL.retroGames[id]; }, spots: [c], retro: c, parts: () => ({ body: AM.cabinet(c.index) }),
       eye: [0, S.y - LEAN_S * 1.1, S.z + LEAN_C * 1.1], look: [0, S.y, S.z], wide: [0, 1.1, 3.1],
       lamps: [[0, 2.6, 1.1], [0, 2.1, 2.3], [-1.5, 2.4, 0.7], [1.5, 2.4, 0.7]], crowd: [[[-1.5, 0.85], [1.5, 0.9]]], coconut: 0.45, crackAt: [0, 1.12, 0.5], steer: 2.6
     };
@@ -389,27 +390,27 @@
       if (w.delay > 0) w.delay -= dt;
       else w.moodT = Math.max(0, w.moodT - dt);
       const mood = w.delay > 0 || w.moodT <= 0 ? 0 : w.mood;
-      let lean = leaning, armL = -0.12 + Math.sin(t * 1.3) * 0.05, armR = -0.12 + Math.sin(t * 1.3 + 1) * 0.05, spread = 0.1, head = leaning ? 0.15 : 0, look = leaning ? 0 : Math.sin(t * 0.45) * 0.35, sway = 0, kick = 0;
+      let lean = leaning, armR = -0.12 + Math.sin(t * 1.3) * 0.05, armL = -0.12 + Math.sin(t * 1.3 + 1) * 0.05, spread = 0.1, head = leaning ? 0.15 : 0, look = leaning ? 0 : Math.sin(t * 0.45) * 0.35, sway = 0, kick = 0;
       if (dance) {
         const b = t * 7.5;
-        armL = -2.4 + Math.sin(b) * 0.6; armR = -2.4 - Math.sin(b) * 0.6; spread = 0.35; lean = -0.05; look = 0;
+        armR = -2.4 + Math.sin(b) * 0.6; armL = -2.4 - Math.sin(b) * 0.6; spread = 0.35; lean = -0.05; look = 0;
         sway = Math.sin(b * 0.5) * 0.45; head = Math.sin(b) * 0.15; kick = Math.sin(b);
       } else if (mood === CHEER) {
-        armL = armR = -2.55 - Math.abs(Math.sin(t * 11)) * 0.35; spread = 0.35; head = -0.3; lean = -0.1; look = 0;
+        armR = armL = -2.55 - Math.abs(Math.sin(t * 11)) * 0.35; spread = 0.35; head = -0.3; lean = -0.1; look = 0;
       } else if (mood === FLOP) {
-        armL = armR = -2.8; spread = -0.55; head = 0.3; lean = 0.08; look = Math.sin(t * 9) * 0.25;
+        armR = armL = -2.8; spread = -0.55; head = 0.3; lean = 0.08; look = Math.sin(t * 9) * 0.25;
       } else if (mood === PUMP) {
-        armR = -2.5 - Math.abs(Math.sin(t * 12)) * 0.3;
-      } else if (leaning) armL = armR = -0.55;
-      w.lean += (lean - w.lean) * ease; w.armL += (armL - w.armL) * ease; w.armR += (armR - w.armR) * ease;
+        armL = -2.5 - Math.abs(Math.sin(t * 12)) * 0.3;
+      } else if (leaning) armR = armL = -0.55;
+      w.lean += (lean - w.lean) * ease; w.armR += (armR - w.armR) * ease; w.armL += (armL - w.armL) * ease;
       w.spread += (spread - w.spread) * ease; w.head += (head - w.head) * ease; w.look += (look - w.look) * ease; w.sway += (sway - w.sway) * ease;
       w.cave.root.position.x = w.at[o]; w.cave.root.position.z = w.at[o + 1];
       w.cave.root.rotation.x = w.lean;
       w.cave.root.rotation.y = w.at[o + 2] + w.sway;
-      P.legL.rotation.x = -w.lean - Math.max(0, kick) * 0.5;
-      P.legR.rotation.x = -w.lean - Math.max(0, -kick) * 0.5;
-      P.armL.rotation.x = w.armL; P.armR.rotation.x = w.armR;
-      P.armL.rotation.z = -w.spread; P.armR.rotation.z = w.spread;
+      P.legR.rotation.x = -w.lean - Math.max(0, kick) * 0.5;
+      P.legL.rotation.x = -w.lean - Math.max(0, -kick) * 0.5;
+      P.armR.rotation.x = w.armR; P.armL.rotation.x = w.armL;
+      P.armR.rotation.z = -w.spread; P.armL.rotation.z = w.spread;
       P.head.rotation.x = w.head; P.head.rotation.y = w.look;
     }
   };
@@ -450,13 +451,13 @@
     // Each arm on its grip, or easing to its mood's pose as it lets go.
     aimArm(-1, sit, r.roll, gy, gz);
     r.lx += ((holdL ? RIDER_AIM.x : lx) - r.lx) * ease; r.lz += ((holdL ? RIDER_AIM.z : lz) - r.lz) * ease;
-    P.armL.rotation.x = r.lx + (RIDER_AIM.x - r.lx) * r.holdL; P.armL.rotation.z = r.lz + (RIDER_AIM.z - r.lz) * r.holdL;
+    P.armR.rotation.x = r.lx + (RIDER_AIM.x - r.lx) * r.holdL; P.armR.rotation.z = r.lz + (RIDER_AIM.z - r.lz) * r.holdL;
     aimArm(1, sit, r.roll, gy, gz);
     r.rx += ((holdR ? RIDER_AIM.x : rx) - r.rx) * ease; r.rz += ((holdR ? RIDER_AIM.z : rz) - r.rz) * ease;
-    P.armR.rotation.x = r.rx + (RIDER_AIM.x - r.rx) * r.holdR; P.armR.rotation.z = r.rz + (RIDER_AIM.z - r.rz) * r.holdR;
+    P.armL.rotation.x = r.rx + (RIDER_AIM.x - r.rx) * r.holdR; P.armL.rotation.z = r.rz + (RIDER_AIM.z - r.rz) * r.holdR;
     // The legs and head undo the body's lean past the seat's, and the head most of the beast's pitch.
     const bent = sit - seat.lean;
-    P.legL.rotation.x = -seat.reach - bent + kick; P.legR.rotation.x = -seat.reach - bent - kick;
+    P.legR.rotation.x = -seat.reach - bent + kick; P.legL.rotation.x = -seat.reach - bent - kick;
     P.head.rotation.x = r.head - (bent + R.rotation.x) * 0.8; P.head.rotation.y = r.look;
   };
   // A rider's arm at `side` (-1 its left) aimed from its shoulder at its grip (`gy`, `gz` from the hip, see
@@ -828,13 +829,13 @@
     // fist, in its own units.
     rider = null;
     if (play.rocker && visitor) {
-      const seat = AM.RIDE_SEATS[slot], cave = models.caveman(BL.contributors.traitsFor(visitor)), P = cave.parts, k = seat.scale, a = P.armR.position;
+      const seat = AM.RIDE_SEATS[slot], cave = models.caveman(BL.contributors.traitsFor(visitor)), P = cave.parts, k = seat.scale, a = P.armL.position;
       for (const held of [P.club, P.gun, P.lion, P.board]) if (held) held.visible = false;
       Object.assign(cave.root.position, { x: 0, y: seat.y, z: seat.z });
       Object.assign(cave.root.scale, { x: k, y: k, z: k });
-      P.legL.rotation.z = -seat.splay; P.legR.rotation.z = seat.splay;
+      P.legR.rotation.z = -seat.splay; P.legL.rotation.z = seat.splay;
       addChild(play.rocker, cave.root);
-      rider = { cave, seat, k, ax: a.x, ay: a.y, az: a.z, reach: -P.fingersR.position.y, mood: 0, moodT: 0, lean: seat.lean, roll: 0, head: 0, look: 0, holdL: 1, holdR: 1, lx: 0, lz: 0, rx: 0, rz: 0 };
+      rider = { cave, seat, k, ax: a.x, ay: a.y, az: a.z, reach: -P.fingersL.position.y, mood: 0, moodT: 0, lean: seat.lean, roll: 0, head: 0, look: 0, holdL: 1, holdR: 1, lx: 0, lz: 0, rx: 0, rz: 0 };
     }
     // The room's big pieces behind the machine: the stage, the mezzanine with its dark cabinets, every other game's
     // machines as they stand in the hall, and the lights.
@@ -898,7 +899,7 @@
       cave.root.position.x = at[0]; cave.root.position.y = P.y || 0; cave.root.position.z = at[1];
       cave.root.rotation.y = at[2];
       addChild(root, cave.root);
-      watchers.push({ cave, at, t: i * 2.1 + 0.7, mood: 0, moodT: 0, delay: 0, lean: 0, armL: -0.12, armR: -0.12, spread: 0.1, head: 0, look: 0, sway: 0 });
+      watchers.push({ cave, at, t: i * 2.1 + 0.7, mood: 0, moodT: 0, delay: 0, lean: 0, armR: -0.12, armL: -0.12, spread: 0.1, head: 0, look: 0, sway: 0 });
     }
     // The cracking coconuts' halves and flecks, sized to the game's view, and which way is across it.
     bits = flecks(K.coconut || 1);
@@ -924,7 +925,7 @@
       GLASS.nx = s * LEAN_C; GLASS.ny = -LEAN_S; GLASS.nz = c * LEAN_C;
       GLASS.ux = s * LEAN_S; GLASS.uy = LEAN_C; GLASS.uz = c * LEAN_S;
       // The shared screen, its font and the CRT helpers, made in the build (the first visit's) rather than a frame.
-      RG.kit.screen(); RG.kit.crt();
+      BL.retroGames.kit.screen(); BL.retroGames.kit.crt();
     }
   };
   // Every score and win throws embers, as a fire does.
@@ -1077,9 +1078,9 @@
       // Following its mallet, or for a moment after a goal cheering its own or clutching its head at yours.
       T.rivalT = Math.max(0, T.rivalT - dt);
       const cheer = T.rivalT > 0 && rivalMood === CHEER, clutch = T.rivalT > 0 && rivalMood === FLOP;
-      P.armR.rotation.x = cheer ? -2.55 - Math.abs(Math.sin(T.elapsed * 11)) * 0.35 : clutch ? -2.8 : -1 - play.rivalArm * 2.5;
-      P.armL.rotation.x = cheer ? -2.55 - Math.abs(Math.sin(T.elapsed * 11 + 1)) * 0.35 : clutch ? -2.8 : -0.4;
-      P.armL.rotation.z = clutch ? 0.55 : -0.1; P.armR.rotation.z = clutch ? -0.55 : 0.1;
+      P.armL.rotation.x = cheer ? -2.55 - Math.abs(Math.sin(T.elapsed * 11)) * 0.35 : clutch ? -2.8 : -1 - play.rivalArm * 2.5;
+      P.armR.rotation.x = cheer ? -2.55 - Math.abs(Math.sin(T.elapsed * 11 + 1)) * 0.35 : clutch ? -2.8 : -0.4;
+      P.armR.rotation.z = clutch ? 0.55 : -0.1; P.armL.rotation.z = clutch ? -0.55 : 0.1;
       P.head.rotation.x = clutch ? 0.3 : cheer ? -0.3 : 0;
     }
     if (phase === "done") { T.doneT -= dt; if (T.doneT <= 0) showResults(); }
@@ -1135,7 +1136,7 @@
   const drawScreen = (ctx) => {
     if (!retro) return;
     // Paused, the game stands still, so the screen and its glow keep last frame's pixels and are only laid again.
-    const kit = RG.kit, scr = kit.screen(), crt = kit.crt(), W = kit.W, H = kit.H, paused = phase === "pause";
+    const kit = BL.retroGames.kit, scr = kit.screen(), crt = kit.crt(), W = kit.W, H = kit.H, paused = phase === "pause";
     if (!paused) play.draw(scr.ctx);
     SHOWN.w = 0;
     for (let k = 0; k < 4; k++) if (!renderer.project(CORNERS[k * 3], CORNERS[k * 3 + 1], CORNERS[k * 3 + 2], CORNER[k])) return;
@@ -1214,11 +1215,15 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats() };
   };
 
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
   const SCENES = {};
   BL.scenes = BL.scenes || {};
   for (const id of Object.keys(KINDS)) {
     SCENES[id] = BL.scenes[id] = {
-      id, enter: (ctx) => enter(ctx, id), update, overlay, onDonation: () => {}, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+      id, prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
       get inMotion() { return phase === "play" || phase === "count"; }
     };

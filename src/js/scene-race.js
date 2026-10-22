@@ -9,12 +9,11 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
+  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
   const { clamp, lerp, damp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   const COUNTDOWN = 3.4, RESULTS_AFTER = 1.4;
   const CHASE = { dist: 6.4, up: 2.1, ahead: 2.2, lookUp: 1.1, distMin: 3.5, distMax: 11, yawRate: 7, eyeRate: 14, targetRate: 18 };
@@ -27,6 +26,8 @@
   const DEBUG = new URLSearchParams(location.search).has("debug");
   const rainParam = DEBUG ? new URLSearchParams(location.search).get("rain") : null;
   const hourParam = DEBUG ? parseFloat(new URLSearchParams(location.search).get("hour")) : NaN;
+  // draw=0 lines the field up in roster order instead of drawing it, so checks race the same rivals every run.
+  const drawParam = DEBUG ? new URLSearchParams(location.search).get("draw") : null;
   // Crowd swells for CROWD_SWELL seconds on a lap or a finish; the drift tiers are first taught with a notice.
   const CROWD_SWELL = 3;
   const SPARK = models.particleGeometry("#ffb13b", 0.08, 1);
@@ -54,6 +55,12 @@
   };
   // selection persists for the page's life: the garage remembers the last pick across visits.
   const selection = { racer: contributors.activeRoster[0]?.name || null, mount: "kart", track: "bay", mirror: false };
+  // A signed-in visitor with an Ooga races it, as they drive only it on the island; the picker is for the rest.
+  // Their Ooga must be in the cast this visit built, which the garage rows and the field are made from.
+  const ownRacer = () => {
+    const own = BL.net.ownCharacter();
+    return own && racers.all.some((r) => r.name === own.handle) ? own.handle : null;
+  };
   // Bests are kept per track, the mirrored ones under their own key.
   const bestKey = () => selection.mirror ? `${selection.track}-m` : selection.track;
 
@@ -62,12 +69,14 @@
   let home = "hub";
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0, unsubscribeAccount = null;
   // revAt is the countdown time the throttle was first held through; -1 while it is off.
   let revAt = -1, crowdSwell = 0, driftTaught = 0;
   const cam = { yaw: 0, offset: 0, dist: CHASE.dist, shake: 0, lookBack: false, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, garageYaw: 0, garageLift: 0 };
   const targets = [];
-  const cup = { active: false, round: 0, done: false, points: new Float32Array(contributors.activeRoster.length) };
+  // points is indexed by racer and sized to each visit's cast: a signed-in visitor's temporary Ooga joins the
+  // roster after this file loads.
+  const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
   const raceScene = {
     id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
@@ -78,6 +87,7 @@
 
   const buildTrack = (id) => {
     if (track) {
+      fx.clearParticles();
       removeChild(root, track.root);
       track.dispose();
     }
@@ -85,9 +95,10 @@
     const rain = rainParam !== null ? rainParam === "1" : math.randomInt(100) < RAIN_CHANCE;
     const def = raceTrack.trackById(id), hours = raceTrack.THEMES[def.theme].hours;
     const hour = Number.isFinite(hourParam) ? hourParam : hours ? hours[math.randomInt(hours.length)] : null;
-    track = raceTrack.build(def, { renderer, detail, rain, spectators: !contributors.solo, slots: contributors.activeRoster.length, hour, mirror: selection.mirror });
+    track = raceTrack.build(def, { renderer, detail, rain, spectators: !contributors.solo, slots: Math.min(racersMod.FIELD, contributors.activeRoster.length), hour, mirror: selection.mirror });
     addChild(root, track.root);
     buildWeather();
+    track.renderOpts.meshRigs = true;
     raceScene.renderOpts = track.renderOpts;
     // Fog that ends in the clear colour with no sky pass hides everything past fogFar, so the far plane stops there.
     const o = track.renderOpts, fogIsClear = !o.horizon && !o.zenith && o.fog && o.clear && o.fog[0] === o.clear[0] && o.fog[1] === o.clear[1] && o.fog[2] === o.clear[2];
@@ -143,7 +154,9 @@
         w.z[i] = (Math.random() - 0.5) * WEATHER_RANGE * 2;
       }
       const sway = w.snow ? Math.sin(sceneTime * 1.3 + w.phase[i]) * 0.6 : 0;
-      raceTrack.writeInstance(data, i * 20, w.snow ? sceneTime + w.phase[i] : 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      // Rain stands bolt upright, so its fixed yaw comes precomputed as the exact cos(0)/sin(0) pair.
+      if (w.snow) raceTrack.writeInstance(data, i * 20, sceneTime + w.phase[i], 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      else raceTrack.writeInstance(data, i * 20, 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1, 1, 0);
     }
     w.node.instanceVersion++;
   };
@@ -177,8 +190,21 @@
     racers.setup({ track, playerName: selection.racer, playerMount: selection.mount, lapCount: track.laps });
     items.setTrack(track);
   };
+  // The garage holds the visitor to their own Ooga when they have one; true when that changed the pick.
+  const applyOwn = () => {
+    const own = ownRacer();
+    rhud.lockRacer(own);
+    if (!own || own === selection.racer) return false;
+    selection.racer = own;
+    return true;
+  };
+  // Back from a race the garage lines up freshly drawn rivals; a track picked in the garage keeps them, and
+  // Race again, the next track and every race of a cup run the same field.
   const toGarage = () => {
+    if (phase !== "garage") racers.draw();
+    applyOwn();
     phase = "garage";
+    fx.clearParticles();
     cup.active = false;
     cup.done = false;
     rhud.setCup(game.state.race.cup);
@@ -591,14 +617,16 @@
   };
   const onGesture = () => audio.unlock();
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the tally counts the exact bananas and the toasts the
+  // rounded ones (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = racers.player;
     if (p) fx.burst(p.x, p.y + 1.6, p.z, 20, CONFETTI, 2.2);
     // Set taken to 0.01, not 0: race-items' countdown branch must run once to make the banana visible again.
@@ -608,13 +636,9 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  const updateMeter = () => {
-    hud.setMeter(world.level, METER_CAPACITY, phase === "racing" ? `${racers.rankLabel(racers.player.rank)} of ${racers.racers.length}` : "stable");
-  };
   const tooltipFor = (hit) => {
     const o = hit.owner;
     if (o.kind === "racer") return BL.characters.displayOf(o.racer.name);
@@ -622,13 +646,16 @@
   };
   const simulate = (dt) => {
     accumulator = Math.min(accumulator + dt, FIXED * MAX_SUBSTEPS);
-    let first = true;
+    let first = true, stepped = false;
     while (accumulator >= FIXED) {
       accumulator -= FIXED;
       racers.substep(FIXED);
       items.update(FIXED, sceneTime, first);
       first = false;
+      stepped = true;
     }
+    // The pickups' spin, bob and pad glow are posed once a frame, from the last substep's spinT.
+    if (stepped) items.pose();
   };
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
@@ -690,11 +717,6 @@
       rhud.setPips(p.bananas, p.meterFull);
       rhud.setSpeed(Math.abs(p.speed) * 2.6);
     }
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      updateMeter();
-    }
   };
   const drawExtra = (ctx2d) => {
     if (phase !== "racing" && phase !== "finished" && phase !== "paused") return;
@@ -710,7 +732,10 @@
     renderLocker();
     hud.toast("Loot locker cleared");
   };
-  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
       if (phase === "racing") pause(true);
@@ -730,6 +755,10 @@
     if (e.key === "l" || e.key === "L") demoTip(120000);
   };
   const onBlur = () => pause(true);
+  // The sign-in can answer once the garage is up; anywhere else the next garage applies it.
+  const accountChanged = () => {
+    if (phase === "garage" && applyOwn()) placeRacers();
+  };
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
@@ -760,7 +789,8 @@
     agent = raceScene.agent = BL.agent.create({ groundAt: agentGround, form: "code" });
     addChild(root, agent.root);
     placeAgent();
-    racers = racersMod.create({ root, input, fx, game, track });
+    racers = racersMod.create({ root, input, fx, game, track, renderer, shuffle: drawParam !== "0" });
+    cup.points = new Float32Array(racers.all.length);
     mark("racers");
     items = raceItems.create({ root, racers, fx, track });
     items.setTrack(track);
@@ -774,14 +804,6 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -797,8 +819,10 @@
       onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "racer" ? hit.owner.racer.cave : null),
       onTap: (hit) => {
         if (hit && hit.owner.kind === "racer") {
-          if (phase === "garage") rhud.el.racers.querySelector(`[data-racer="${hit.owner.racer.name}"]`).click();
-          else fx.say(hit.owner.racer.cave, "Ooga busy!", 1.2);
+          const refused = phase === "garage" && ownRacer() ? BL.net.mayDrive(hit.owner.racer.name) : null;
+          if (phase !== "garage") fx.say(hit.owner.racer.cave, "Ooga busy!", 1.2);
+          else if (refused) fx.say(hit.owner.racer.cave, refused, 1.6);
+          else rhud.el.racers.querySelector(`[data-racer="${hit.owner.racer.name}"]`).click();
         }
       },
       onOrbit: (dx, dy) => {
@@ -824,8 +848,6 @@
       else if (action === "leave") go(home);
       else if (action === "item") useItem();
       else if (action === "mute") toggleMute();
-      else if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") {
         game.clearLoot();
         onLootCleared();
@@ -840,7 +862,6 @@
     hud.el.sheet.dataset.open = "false";
     rhud.el.joyLook.hidden = true;
     rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
-    meterTimer = 0;
     phase = "garage";
     cam.garageYaw = cam.garageLift = 0;
     toGarage();
@@ -848,8 +869,12 @@
       for (const cave of contributors.activeRoster) hud.setRosterRow(cave.name, contributors.stateFor(cave), contributors.ageLabel(cave));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Tap an Ooga, a ride and a track, then Race!" : "Pick an Ooga, a ride and a track, then Race! (Enter)"), 1200);
+    hintTimer = window.setTimeout(() => {
+      const pick = ownRacer() ? "a ride and a track" : "an Ooga, a ride and a track";
+      hud.hint(COARSE ? `Tap ${pick}, then Race!` : `Pick ${pick}, then Race! (Enter)`);
+    }, 1200);
     window.addEventListener("blur", onBlur);
+    unsubscribeAccount = BL.net.subscribe(accountChanged);
     Object.assign(raceScene, {
       root, camera, input,
       debug: {
@@ -876,12 +901,13 @@
           get phase() {
             return phase;
           },
-          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup, simulate: (seconds) => {
+          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup,           simulate: (seconds) => {
             for (let t = 0; t < seconds; t += FIXED) {
               sceneTime += FIXED;
               racers.substep(FIXED);
               items.update(FIXED, sceneTime);
             }
+            items.pose();
           },
           get cam() {
             return cam;
@@ -897,6 +923,8 @@
     window.clearInterval(stateTimer);
     window.clearTimeout(hintTimer);
     window.removeEventListener("blur", onBlur);
+    unsubscribeAccount();
+    unsubscribeAccount = null;
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     audio.dispose();
@@ -925,7 +953,7 @@
   };
   const liveGeometry = (set) => {
     agent.liveGeometry(set);
-    for (const r of racers.racers) set.add(r.cave.headOpen).add(r.cave.headClosed);
+    for (const r of racers.all) set.add(r.cave.headOpen).add(r.cave.headClosed);
   };
   const stats = () => {
     let nodes = 0;

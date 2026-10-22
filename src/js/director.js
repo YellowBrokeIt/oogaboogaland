@@ -7,7 +7,8 @@
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  if (DEBUG) window.BL.contributors.seedDebugActivity();
+  // Local play-tests can run the donation show without emitting a paid event or changing the tally.
+  const TEST_DONATIONS = params.get("testdonations") === "1" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   // A game still being built sets `wip: true` on its scene and stays unregistered, so nothing can enter it
   // and its cave seals, unless the page opts in: ?wip=<scene id> opens that game and lands in it, wip=1 opens
   // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens.
@@ -27,27 +28,33 @@
     : 100;
   const FADE = 0.25;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
+  // Choose before renderer creation so a memory-limited device never allocates high-tier targets.
+  // The signal is approximate and optional; absent or invalid values leave the boot-time probe in charge.
+  const DEVICE_MEMORY = navigator.deviceMemory;
+  const MEMORY_LIMITED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY <= 8;
+  const INITIAL_QUALITY = COARSE || MEMORY_LIMITED ? "medium" : "high";
   const $ = (id) => document.getElementById(id);
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
   const overlayCanvas = $("overlay");
   const overlayCtx = overlayCanvas.getContext("2d");
+  // The overlay's CSS size, read on resize rather than in drawFade: a read there follows the HUD
+  // writes of the scenes' overlays and forces a synchronous layout every faded frame (as in fx.js).
+  let overlayCssW = overlayCanvas.clientWidth, overlayCssH = overlayCanvas.clientHeight;
+  const overlayObserver = new ResizeObserver(() => {
+    overlayCssW = overlayCanvas.clientWidth;
+    overlayCssH = overlayCanvas.clientHeight;
+  });
+  overlayObserver.observe(overlayCanvas);
   const qualityLabel = $("quality");
   const curtain = $("curtain");
   const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
-  const SAYINGS = [
-    "growing the island…", "counting the bananas…", "waking the Oogas…", "polishing the rocks…", "herding the clouds…",
-    "lighting the torches…", "packing the leaf chutes…", "lashing sticks into a rocket…", "filling barrels with banana mash…",
-    "warming up the Fire Pot…", "sweeping the rope bridge…", "feeding the fireflies…", "teaching cavemen to drive…",
-    "hiding the jetpack…", "tightening the Vine Knots…", "fluffing the leaf beds…"
-  ];
-  $("curtain-saying").textContent = SAYINGS[Math.floor(Math.random() * SAYINGS.length)];
   const worldClock = $("world-clock");
   let renderer = null;
   if (!params.has("canvas2d")) {
     try {
-      renderer = glRenderer.createRenderer(sceneCanvas, { quality: COARSE ? "medium" : "high" });
+      renderer = glRenderer.createRenderer(sceneCanvas, { quality: INITIAL_QUALITY });
     } catch (err) {
       console.warn("WebGL2 renderer failed, using Canvas 2D fallback", err);
       // A canvas that has held a WebGL context can never return a 2D one: replace the element.
@@ -63,15 +70,56 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
+  window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
+    if (donations.real) return;
+    if (active) active.onDonation(donation);
+    else game.recordDonation(donation);
+    window.BL.hud.setDonationStats(game.state);
+  });
+  window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
   const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
-  let active = null;
+  let active = null, activeMeshRigs = false;
   let sceneTime = 0;
   let transition = null;
   let fade = 0;
+  const positionDebug = $("position-debug"), POSITION_DEBUG = DEBUG && params.get("pos") !== "0";
+  let positionDebugNext = 0, positionDebugState = "";
+  const positionText = p => `${p.x.toFixed(5)},${p.y.toFixed(5)},${p.z.toFixed(5)}`;
+  const updatePositionDebug = force => {
+    if (!POSITION_DEBUG || !active || active.id === "hub" || !active.camera) return;
+    const debug = active.debug, actor = debug?.pilot?.player || debug?.crew?.player;
+    const actorPosition = actor?.root?.position;
+    const room = debug?.dsb?.interiors?.active?.room?.id;
+    const camera = active.camera;
+    const state = `${active.id}${room ? ` · ${room}` : ""}${actor?.traits?.name ? ` · ${actor.traits.name}` : ""}`
+      + (actorPosition ? `\npos=${positionText(actorPosition)}` : "")
+      + `\ncamera=${positionText(camera.position)}\nlook=${positionText(camera.target)}`;
+    if (!force && state === positionDebugState) return;
+    positionDebugState = state;
+    positionDebug.dataset.copied = "false";
+    positionDebug.textContent = `${state}\nclick to copy debug snapshot`;
+  };
+  const copyPositionDebug = () => {
+    updatePositionDebug(true);
+    const url = new URL(location.href);
+    url.searchParams.set("debug", "1");
+    const value = `${positionDebugState}\nurl=${url.href}`;
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(value).catch(() => {});
+    else {
+      const field = document.createElement("textarea");
+      field.value = value;
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand("copy");
+      field.remove();
+    }
+    positionDebug.dataset.copied = "true";
+    positionDebug.blur();
+  };
   const CLOCK_NS = "http://www.w3.org/2000/svg";
   const clockSvg = document.createElementNS(CLOCK_NS, "svg");
   const clockPath = document.createElementNS(CLOCK_NS, "path");
@@ -85,7 +133,7 @@
   const CLOCK_DATE = new Date();
   clockSvg.setAttribute("viewBox", "0 0 30 6");
   clockSvg.setAttribute("class", "sign");
-  clockSvg.setAttribute("aria-hidden", "true");
+  clockSvg.setAttribute("role", "img");
   clockPath.setAttribute("fill", "currentColor");
   clockSvg.append(clockPath);
   worldClock.replaceChildren(clockSvg);
@@ -131,16 +179,33 @@
     worldClock.style.width = `${cells / 6}em`;
     clockPath.setAttribute("d", d);
     worldClock.dateTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    worldClock.setAttribute("aria-label", `${Number.isFinite(clockTime) || clockDaylen > 0 ? "Ooga Booga time" : "Local time"} ${text}`);
+    clockSvg.setAttribute("aria-label", `${Number.isFinite(clockTime) || clockDaylen > 0 ? "Ooga Booga time" : "Local time"} ${text}`);
+  };
+  // A scene may `prepare(place, ctx)` before it is built (the Timechain Sphere's rooms: their code, deferred on a
+  // hosted page, and whose visit it is). It answers null to go ahead, `{ scene, place }` to arrive there instead, or a
+  // promise of either; the screen holds dark until it settles, and a rejection fades back in where the visitor was. The
+  // scene there is told (`stay`) once the fade is done and a new transition can start, so it can put back what it set
+  // up to leave; until then its departure still holds, and a press during the fade is refused rather than lost.
+  const settle = (t, answer) => {
+    if (answer && typeof answer.then === "function") {
+      t.ready = false;
+      answer.then((redirect) => { t.redirect = redirect || null; t.ready = true; }, (error) => { t.failed = error || new Error("Not ready"); t.ready = true; });
+    } else t.redirect = answer || null;
   };
   const go = (id, place = null, instant = false) => {
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
-    transition = { next, place, out: true, t: 0, instant };
+    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
+    if (next.prepare) {
+      window.BL.models.setScope(next.id);
+      settle(transition, next.prepare(place, ctx));
+      window.BL.models.setScope(active ? active.id : null);
+    }
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
+  window.BL.donationPopup.onClose(() => router.dismissPlace("hub", "donate"));
   // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
   document.querySelector(".home-link").addEventListener("click", (e) => {
     e.preventDefault();
@@ -156,17 +221,34 @@
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   if (coarse) for (const n of document.querySelectorAll("[data-intro] [data-coarse]")) n.textContent = n.dataset.coarse;
   const openIntro = () => intros.find((el) => !el.hidden) || null;
+  // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
+  const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
   const enter = (next, place = null) => {
     ctx.from = active ? active.id : null;
     ctx.place = place;
+    positionDebug.removeEventListener("click", copyPositionDebug);
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
     for (const el of intros) el.hidden = el.dataset.intro !== next.id;
     // The page styles by scene too: the games hide the island's sheet, see style.css.
     document.body.dataset.activeScene = next.id;
+    window.BL.net.setBody(null);
+    // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
+    window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
+    window.BL.models.setScope(next.id);
     next.enter(ctx);
+    activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    showMic();
     sceneTime = 0;
     router.arrive(next.id, place, ctx.from === null);
+    if (POSITION_DEBUG && next.id !== "hub") {
+      positionDebug.hidden = false;
+      positionDebug.setAttribute("aria-label", "Debug scene, character and camera state. Click to copy a debug snapshot.");
+      positionDebugState = "";
+      positionDebugNext = 0;
+      positionDebug.addEventListener("click", copyPositionDebug);
+      updatePositionDebug(true);
+    }
   };
   const live = new Set();
   const visit = (node) => {
@@ -198,34 +280,49 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
+    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
+    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
     renderer.releaseUnused(liveGeometry());
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
+  // Where a settled transition lands: its own scene, or where its preparation redirected it.
+  const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
+  const abandon = () => {
+    window.BL.hud.toast("That place could not be opened · try again");
+    router.abandon();
+  };
+  const settled = () => {
+    const failed = transition.failed;
+    transition = null;
+    if (failed && active && active.stay) active.stay();
+  };
   const stepTransition = (dt) => {
     if (transition.instant) {
-      const { next, place } = transition;
-      swap(next, place);
-      transition = null;
+      if (!transition.ready) return;
+      if (transition.failed) abandon();
+      else { const { next, place } = landing(transition); swap(next, place); }
+      settled();
       fade = 0;
       return;
     }
     transition.t += dt;
     if (transition.out) {
       fade = Math.min(1, transition.t / FADE);
-      if (fade < 1) return;
-      swap(transition.next, transition.place);
+      if (fade < 1 || !transition.ready) return;
+      if (transition.failed) abandon();
+      else { const { next, place } = landing(transition); swap(next, place); }
       transition.out = false;
       transition.t = 0;
       return;
     }
     fade = 1 - Math.min(1, transition.t / FADE);
-    if (fade === 0) transition = null;
+    if (fade === 0) settled();
   };
-  // Fills in CSS pixels (clientWidth/clientHeight), not backing-store pixels.
+  // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
   const drawFade = () => {
     overlayCtx.globalAlpha = fade;
     overlayCtx.fillStyle = "#000000";
-    overlayCtx.fillRect(0, 0, overlayCanvas.clientWidth, overlayCanvas.clientHeight);
+    overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
   };
 
@@ -265,7 +362,7 @@
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
   const tierFromBoot = (ms) => {
     if (renderer.kind !== "webgl2") return;
-    const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM ? "medium" : null;
+    const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM || MEMORY_LIMITED ? "medium" : null;
     if (!wanted || QUALITY_ORDER.indexOf(wanted) <= QUALITY_ORDER.indexOf(renderer.quality)) return;
     renderer.setQuality(wanted);
     showQuality();
@@ -285,7 +382,7 @@
   };
   const frameInterval = () => (elapsed > WARMUP && !document.hasFocus() && !active.inMotion ? UNFOCUSED_INTERVAL : 0);
 
-  const housekeep = () => renderer.releaseUnused(liveGeometry());
+  const housekeep = () => { if (active) renderer.releaseUnused(liveGeometry()); };
 
   let elapsed = 0;
   let lastTime = performance.now();
@@ -295,14 +392,27 @@
     elapsed += dt;
     if (transition) stepTransition(dt);
     sceneTime += dt;
+    // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
+    // eaten since it arrived, in whole bananas.
+    if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     active.update(dt, sceneTime);
+    if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
+      positionDebugNext = elapsed + 0.1;
+      updatePositionDebug(false);
+    }
     agentPlay.update(dt);
     updateWorldClock(now);
-    const drawn = renderer.render(active.root, active.camera, active.renderOpts);
+    const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
     if (drawn && !firstDraw) {
       firstDraw = true;
       mark("drawn");
       openCurtain();
+      if (params.get("signin") === "contributor-required") {
+        window.BL.hud.toast("Sign-in is for contributors with their own Ooga. Keep exploring signed out.");
+        params.delete("signin");
+        const back = new URL(location.href); back.searchParams.delete("signin");
+        history.replaceState(history.state, "", back.pathname + back.search + back.hash);
+      }
     }
     if (!drawn && renderer.failure && !params.has("canvas2d")) {
       console.warn("WebGL2 programs failed, reloading with the Canvas 2D fallback", renderer.failure);
@@ -337,10 +447,10 @@
     if (e.type === "blur" || e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2)) rightShift = false;
   };
   const onKeyDown = (e) => {
+    if (!active) return;
     if (e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2)) rightShift = true;
     if (e.repeat) return;
-    const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
-    if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
+    if (window.BL.controls.uiKey(e)) return;
     const intro = openIntro();
     if (intro) {
       // Registered at boot, before any scene's controls, so this keeps the key from them too.
@@ -356,6 +466,15 @@
     if (konamiAt === KONAMI.length) {
       konamiAt = 0;
       feedPanel.toggle();
+    }
+    if (TEST_DONATIONS && key === "l" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (transition) return;
+      const shown = active.previewDonation && active.previewDonation();
+      window.BL.hud.toast(shown ? "Test donation animation · real totals unchanged"
+        : active.previewDonation ? "Waiting for the local donation backend" : "Enter the mainland or Lightning Factory to preview a donation");
+      return;
     }
     if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
@@ -380,6 +499,15 @@
       location.reload();
       return;
     }
+    // M mutes and unmutes the microphone while in voice, in the scenes that share voice and leave M free
+    // (`micKey`); a game's or a hall's own M still mutes its sound.
+    if (key === "m" && active.micKey && window.BL.voice.stats.enabled && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      window.BL.voice.toggle();
+      return;
+    }
+    // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
+    if (key === "b" && !DEBUG) return;
     active.onKey(e);
   };
   const onVisibility = () => {
@@ -418,15 +546,56 @@
   showBlockHeight(chain.snapshot);
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
   if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
+  if (!params.has("nosim") && params.get("totems") !== "0") window.BL.totemFeed.start();
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
   // and three consecutive failures hand the session to Esplora on its own.
   if (!params.has("nosim") && params.get("chain") !== "0") chain.start({ source: params.get("chain") });
+  // The account needs the Worker: without one /api/me finds nothing and the sheet shows no sign-in.
+  const net = window.BL.net;
+  const unsubscribeAccount = net.subscribe(window.BL.hud.showAccount);
+  const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
+  // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
+  const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
+  const unsubscribeVoiceMarks = window.BL.voice.subscribe(window.BL.hud.showVoices);
+  const unsubscribeMic = window.BL.voice.subscribe(showMic);
+  const accountReady = !params.has("nosim") && params.get("net") !== "0" ? net.start() : Promise.resolve();
   // A tab opened in the background waits for its first look before it holds any socket.
   if (document.hidden) {
     mempool.setHidden(true);
     chain.setHidden(true);
   }
-  const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
+  // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
+  // follows the API's. The page's own Worker turns real mode on in the account's look at /api/me, so the subscription
+  // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
+  // donation pushed before the first scene is ready still counts in the saved tally. An on-chain tip the visitor left
+  // the kiosk waiting on says it was theirs, in whatever scene they are, in place of the scene's own toast.
+  const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
+  let unsubscribeDonations = null;
+  accountReady.then(() => {
+    if (destroyed) return;
+    if (net.state.donations) donations.useOrigin();
+    unsubscribeDonations = donations.subscribe((donation, bananas) => {
+      if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
+      window.BL.donationPopup.receive(donation, bananas);
+      if (active) active.onDonation(donation, bananas);
+      else game.recordDonation(donation, bananas && bananas.exact);
+      window.BL.hud.setDonationStats(game.state);
+      if (donations.waited(donation.id)) {
+        const n = bananas && bananas.rounded;
+        window.BL.hud.toast(`Your on-chain tip confirmed · ${gameMod.formatLarge(donation.sats)} sats${n ? ` · ${gameMod.formatLarge(n)} banana${n === 1 ? "" : "s"}` : ""}`);
+      }
+    }, {
+      identity: () => game.state,
+      // An on-chain payment seen before its block: the active scene shows it where it can (the kiosk that made the
+      // invoice), and otherwise one the visitor left the kiosk waiting on says it is on its way, or what is still owed.
+      onSeen: (id, sats, due, left, pricing) => {
+        if (window.BL.donationPopup.seen(id, sats, due, left, pricing)) return;
+        if (active && active.onSeen && active.onSeen(id, sats, due, left, pricing)) return;
+        if (donations.waitingOn(id)) window.BL.hud.toast(left ? `Your on-chain tip arrived short · send ${gameMod.formatLarge(left)} more sats to the same address` : "Your on-chain tip is on its way · waiting for a block");
+      },
+      onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
+    });
+  });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
   const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
@@ -452,7 +621,7 @@
       const d = active && active.debug && active.debug.weather, w = d && d.state ? d : null, s = mempool.state, c = chain.snapshot;
       const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
       const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
-      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.stats} stats · ${s.blocks} blocks · inflow ${s.inflow} vB/s\npool      ${c.count} tx · ${c.deep.toFixed(1)} blocks deep · paying ${c.paying.toFixed(2)} MvB (avg ${c.payEma.toFixed(2)}) · floor ${c.floor.toFixed(2)} sat/vB · via ${c.source}${c.degraded ? " (fallback)" : ""}\nprice     ${c.priceUsd ? c.priceUsd.toFixed(2) : "-"} · via ${c.priceSource || "-"}\naxes      soak ${c.soak.toFixed(2)} · gale ${c.gale.toFixed(2)} · pace ${(c.pace / 60).toFixed(1)} min\nweather   ${w ? `${w.state.name} · ${w.state.drops}/${w.state.capacity} drops · wind ${w.state.wind.toFixed(1)} · cloud ${w.state.cloud.toFixed(2)} · ${w.state.strikes} strikes` : "no weather in this scene"}`;
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.stats} stats · ${s.blocks} blocks · inflow ${s.inflow} vB/s\npool      ${c.count} tx · ${c.deep.toFixed(1)} blocks deep · paying ${c.paying.toFixed(2)} MvB (avg ${c.payEma.toFixed(2)}) · floor ${c.floor.toFixed(2)} sat/vB · via ${c.source}${c.degraded ? " (fallback)" : ""}\nprice     ${c.priceUsd ? c.priceUsd.toFixed(2) : "-"} · via ${c.priceSource || "-"}\naxes      arriving ${c.gale.toFixed(2)} (weather) · paying ${c.soak.toFixed(2)} (data) · pace ${(c.pace / 60).toFixed(1)} min\nweather   ${w ? `${w.state.name} · arrivals ${w.state.arrivals} · storm ${w.state.storm.toFixed(2)} · ${w.state.drops}/${w.state.capacity} drops · wind ${w.state.wind.toFixed(1)} · cloud ${w.state.cloud.toFixed(2)} · ${w.state.strikes} strikes` : "no weather in this scene"}`;
       if (stateEl.textContent !== text) stateEl.textContent = text;
       if (!dirty) return;
       dirty = false;
@@ -485,9 +654,27 @@
   const sceneId = requestedScene === "lab" && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
-  const boot = () => {
+  let destroyed = false;
+  const boot = async () => {
+    // A signed-in newcomer must join before crew construction, including direct routes.
+    // net.start is bounded; an unavailable backend leaves the static island usable.
+    await accountReady;
+    if (destroyed) return;
+    let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
+    if (first.prepare) {
+      try {
+        window.BL.models.setScope(first.id);
+        const redirect = await first.prepare(place, ctx);
+        if (redirect) ({ next: first, place } = landing({ redirect }));
+      } catch {
+        first = scenes[Object.keys(scenes)[0]];
+        place = null;
+        window.BL.hud.toast("That place could not be opened · here is the island");
+      }
+      if (destroyed) return;
+    }
     const built = performance.now();
-    enter(Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], routed && routed.place);
+    enter(first, place);
     mark("ready");
     tierFromBoot(performance.now() - built);
     raf = window.requestAnimationFrame(frame);
@@ -539,27 +726,39 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival", "npcSync", "cloudFloorAt", "footsteps", "timechain"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
   }
   const destroy = () => {
+    destroyed = true;
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
-    unsubscribeDonations();
+    overlayObserver.disconnect();
+    if (unsubscribeDonations) unsubscribeDonations();
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();
     feedPanel.close();
+    window.BL.donationPopup.dispose();
     router.dispose();
     mempool.dispose();
     chain.dispose();
     window.BL.oogatronLive.dispose();
+    window.BL.totemFeed.dispose();
+    unsubscribeAccount();
+    unsubscribeVoice();
+    unsubscribeRosterMarks();
+    unsubscribeVoiceMarks();
+    unsubscribeMic();
+    window.BL.voice.dispose();
+    net.dispose();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);
     document.removeEventListener("visibilitychange", onVisibility);
-    active.leave();
+    positionDebug.removeEventListener("click", copyPositionDebug);
+    if (active) active.leave();
     renderer.dispose();
   };
   window.addEventListener("pagehide", (e) => {

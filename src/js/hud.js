@@ -4,16 +4,65 @@
   const { canvasRenderer } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
-  const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "chill", online: "online" };
-  // Tooltip dots retain their human-presence color without changing NPC activity.
+  const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
+  const ROSTER_ORDER = { working: 0, chilling: 1, sleeping: 2, away: 3 };
+  // Signed-in players online lead the roster, ahead of every activity.
+  const ONLINE_RANK = -1;
+  const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
+  // Local control is online only while signed in; remote presence remains independent.
   const statusFor = (cave) => {
     const actor = cave.tooltipOwner || cave;
-    return actor.humanControlled ? "online" : actor.state === "away" ? "chilling" : actor.state;
+    const online = cave.remoteControlled || actor.remoteControlled
+      || !!BL.net.state.me && (cave.controlled || actor.humanControlled);
+    return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const DONATED_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let donorUnit = "bananas";
+  let donationStats = null, liveDonors = null;
+  const setDonationStats = (stats) => {
+    donationStats = stats;
+    if (liveDonors) liveDonors(true);
+  };
+  const currentDonationRate = () => {
+    const live = BL.donationRate.current, saved = BL.donations.state.tally?.rate;
+    return live && (!saved || live.at >= saved.at) ? live : saved;
+  };
+  let valuedSats, valuedPrice, donatedValueText = "";
+  // The panel and pile label share today's value, including precision and
+  // missing-price handling. Cache formatting for the pile's overlay loop.
+  const donationValueText = () => {
+    const tally = BL.donations.real ? BL.donations.state.tally : donationStats;
+    const sats = tally ? BL.donations.real ? tally.sats : tally.totalSats : null;
+    const price = currentDonationRate()?.usdPerBtc;
+    if (!donatedValueText || sats !== valuedSats || price !== valuedPrice) {
+      valuedSats = sats; valuedPrice = price;
+      donatedValueText = sats === 0 ? DONATED_COUNT.format(0) : sats !== null && price
+        ? DONATED_COUNT.format(sats / 1e8 * price) : "—";
+    }
+    return donatedValueText;
+  };
   const MESSAGE_FADE_MS = 300;
+  // The page's one toast, which every scene's HUD and the director share: a new one replaces the last.
+  let toastTimer = 0, toastHideTimer = 0;
+  const toast = (text) => {
+    const box = $("toast");
+    window.clearTimeout(toastTimer);
+    window.clearTimeout(toastHideTimer);
+    box.textContent = text;
+    box.hidden = false;
+    $("message-stack").append(box);
+    box.classList.add("show");
+    toastTimer = window.setTimeout(() => {
+      box.classList.remove("show");
+      toastHideTimer = window.setTimeout(() => {
+        if (!box.classList.contains("show")) box.hidden = true;
+      }, MESSAGE_FADE_MS);
+    }, 2800);
+  };
   const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
   const MAX_FLOATING_BOARDS = 12;
@@ -44,7 +93,8 @@
             .filter((value) => typeof value === "string" && value.length <= 256
               && (kind !== "types" || ["commit", "pr", "review", "merge", "issue", "comment"].includes(value))))] : null;
         }
-        windows.push({ x: entry.x, y: entry.y, width: entry.width, paused: entry.paused, screen: { name: screen.name, params }, filters, rollup: entry.rollup === true });
+        windows.push({ x: entry.x, y: entry.y, width: entry.width, paused: entry.paused, screen: { name: screen.name, params }, filters, rollup: entry.rollup === true,
+          controlsHidden: entry.controlsHidden === true });
       }
       return { windows, lastUsed: Number.isInteger(state.lastUsed) ? state.lastUsed : -1,
         lastWidth: Number.isFinite(state.lastWidth) && state.lastWidth > 0 ? state.lastWidth : 440 };
@@ -53,11 +103,11 @@
   const readSheetState = () => {
     try {
       const state = JSON.parse(localStorage.getItem(SHEET_STATE_KEY));
-      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot"].includes(state.tab) ? state : null;
+      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot", "chat"].includes(state.tab) ? state : null;
     } catch { return null; }
   };
-  const writeSheetState = (open, tab) => {
-    try { localStorage.setItem(SHEET_STATE_KEY, JSON.stringify({ open, tab })); } catch { /* Storage may be unavailable. */ }
+  const writeSheetState = (open, tab, height) => {
+    try { localStorage.setItem(SHEET_STATE_KEY, JSON.stringify({ open, tab, height })); } catch { /* Storage may be unavailable. */ }
   };
   // Sign headings: one pixel path per element, scaled by that element's CSS height.
   const SIGN_NS = "http://www.w3.org/2000/svg";
@@ -100,6 +150,24 @@
     el.replaceChildren(signLettering(text));
   };
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
+  // The roster's voice mark, a 9x9 pixel speaker; the stylesheet shows the parts each state needs.
+  const VOICE_PARTS = [
+    ["voice-speaker", "M0 3h2v3H0zM2 2h1v5H2zM3 1h1v7H3z"],
+    ["voice-near", "M5 3h1v3H5z"],
+    ["voice-far", "M7 2h1v5H7z"],
+    ["voice-cross", "M5 3h1v1H5zM7 3h1v1H7zM6 4h1v1H6zM5 5h1v1H5zM7 5h1v1H7z"],
+    ["voice-slash", "M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8z"],
+  ];
+  const voiceIcon = document.createElementNS(SIGN_NS, "svg");
+  voiceIcon.setAttribute("viewBox", "0 0 9 9");
+  voiceIcon.setAttribute("aria-hidden", "true");
+  for (const [part, d] of VOICE_PARTS) {
+    const path = document.createElementNS(SIGN_NS, "path");
+    path.setAttribute("class", part);
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "currentColor");
+    voiceIcon.append(path);
+  }
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -171,15 +239,20 @@
   };
   const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false }) => {
     const el = {
-      meterFill: $("meter-fill"),
-      meterCount: $("meter-count"),
-      meterForecast: $("meter-forecast"),
-      roster: $("roster"),
+      roster: $("roster"), rosterCount: $("roster-count"),
       statDonations: $("stat-donations"),
       statSats: $("stat-sats"),
+      bananaTotal: $("banana-total"), bananaSource: $("banana-source"),
+      bananaLeaders: $("banana-leaders"), bananaEmpty: $("banana-empty"),
+      bananaRecent: $("banana-recent-list"), bananaRecentEmpty: $("banana-recent-empty"),
+      bananaRecentBar: $("banana-recent-bar"), bananaRecentBarLabel: $("banana-recent-bar-label"),
+      donationMessageLabel: $("donation-message-label"),
+      bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
+      bananaPanel: $("bananas-panel"), bananaRateLabel: $("banana-rate-label"),
+      bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
+      donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
-      crateHelp: $("crate-help"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
@@ -193,14 +266,18 @@
       modeFace: $("mode-face-icon"),
       modeHealth: $("mode-health"),
       modeHealthFill: $("mode-health-fill"),
-      modeDestinations: $("detached-destinations"),
+      ownOoga: $("own-ooga-hud"),
+      ownOogaFace: $("own-ooga-face-icon"),
+      ownOogaHealth: $("own-ooga-health"),
+      ownOogaHealthFill: $("own-ooga-health-fill"),
       modeDestinationName: $("detached-destination-name"),
-      modeDestinationDots: [...document.querySelectorAll("[data-detached-preset]")],
       primary: $("primary-hud"),
       primaryIcon: $("primary-icon"),
       primaryStrength: $("primary-strength"),
       primaryStrengthFill: $("primary-strength-fill"),
       gorillaSmash: $("gorilla-smash-hud"),
+      gorillaStrength: $("gorilla-strength"),
+      gorillaStrengthFill: $("gorilla-strength-fill"),
       weapon: $("weapon-hud"),
       weaponToggle: $("weapon-hud"),
       weaponReadout: $("weapon-readout"),
@@ -233,16 +310,13 @@
       sheet: $("sheet"),
       sheetToggle: $("sheet-toggle"),
       sheetBananas: $("sheet-bananas"),
+      sheetResize: $("sheet-resize"),
+      sheetPanels: document.querySelector(".sheet-panels"),
       tabs: [...document.querySelectorAll("[data-tab]")],
       panels: [...document.querySelectorAll("[data-panel]")],
       presets: [...document.querySelectorAll("[data-preset]")],
       inventory: $("inventory"),
       inventoryEmpty: $("inventory-empty"),
-      handle: $("handle"),
-      message: $("message"),
-      qr: $("qr"),
-      qrUrl: $("qr-url"),
-      feed: $("feed"),
       recipe: $("recipe"),
       recipeText: $("recipe-text")
     };
@@ -265,16 +339,23 @@
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     el.lootTab.hidden = !lootEnabled;
-    el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
     const savedSheet = readSheetState();
-    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) ? savedSheet.tab : "roster";
-    for (const tab of el.tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
+    let sheetHeight = Number.isFinite(savedSheet?.height) && savedSheet.height >= 1 && savedSheet.height <= 10000 ? savedSheet.height : null;
+    if (sheetHeight === null) el.sheet.style.removeProperty("--sheet-height");
+    else el.sheet.style.setProperty("--sheet-height", `${sheetHeight}px`);
+    // Ooga Chat has a tab only where a backend answered (chat.js), which the director learns before any scene.
+    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) && (savedSheet.tab !== "chat" || BL.net.state.backend) ? savedSheet.tab : "roster";
+    for (const tab of el.tabs) {
+      tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
+      tab.tabIndex = tab.dataset.tab === sheetTab ? 0 : -1;
+    }
     for (const panel of el.panels) panel.hidden = panel.dataset.panel !== sheetTab;
     el.sheet.dataset.open = String(!!savedSheet?.open);
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
     el.mode.hidden = true;
+    el.ownOoga.hidden = true;
     el.weapon.hidden = true;
     el.magazine.hidden = true;
     el.jetpack.hidden = true;
@@ -283,9 +364,31 @@
       target.addEventListener(type, fn, opts);
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
+    let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
-    const orderedRoster = [...roster].sort((a, b) => b.lastContributionAt - a.lastContributionAt);
+    let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null, onlineCount = 0, onlineShown = -1;
+    const awayRow = document.createElement("li"), awayButton = document.createElement("button");
+    awayRow.className = "roster-away";
+    awayButton.type = "button";
+    awayButton.setAttribute("aria-expanded", "false");
+    awayRow.append(awayButton);
+    // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
+    // The title's chip counts the players online, or the cast while nobody is.
+    const updateAwayButton = () => {
+      if (onlineCount !== onlineShown) {
+        onlineShown = onlineCount;
+        el.rosterCount.textContent = onlineCount ? `${onlineCount} online` : `${roster.length} Oogas`;
+        el.rosterCount.dataset.tone = onlineCount ? "live" : "idle";
+      }
+      if (awayCount === awayShownCount && showAway === awayShownShow) return;
+      awayShownCount = awayCount;
+      awayShownShow = showAway;
+      awayRow.hidden = awayCount === 0;
+      awayButton.textContent = `${showAway ? "Hide" : "Show"} away (${awayCount})`;
+    };
+    const orderedRoster = [...roster].sort((a, b) =>
+      ROSTER_ORDER[BL.contributors.contributionStateFor(a)] - ROSTER_ORDER[BL.contributors.contributionStateFor(b)] ||
+      (b.lastContributionAt || b.lastCommitAt) - (a.lastContributionAt || a.lastCommitAt));
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
       const contributor = orderedRoster[rosterIndex];
       const li = document.createElement("li");
@@ -299,6 +402,19 @@
       const name = document.createElement("span");
       name.className = "roster-name";
       name.textContent = contributor.display;
+      // The signed-in player on this Ooga, when there is one: the room's host and their voice.
+      const marks = document.createElement("span"), host = document.createElement("span"), voice = document.createElement("button");
+      marks.className = "roster-marks";
+      host.className = "roster-host";
+      host.hidden = true;
+      host.setAttribute("role", "img");
+      host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
+      host.title = "Host: runs the Oogas for everyone";
+      voice.className = "roster-voice";
+      voice.type = "button";
+      voice.hidden = true;
+      voice.append(voiceIcon.cloneNode(true));
+      marks.append(host, voice);
       const age = document.createElement("span");
       age.className = "roster-age";
       age.append(BL.contributors.contributionAgeLabel(contributor));
@@ -307,66 +423,242 @@
       const activity = BL.contributors.contributionStateFor(contributor);
       state.dataset.state = activity;
       state.append(STATE_LABELS[activity]);
-      li.append(presence, name, age, state);
+      if (activity === "away") {
+        if (!awayRow.parentElement) el.roster.append(awayRow);
+        li.hidden = true; awayCount++;
+      }
+      li.append(presence, name, marks, age, state);
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
+    if (!awayRow.parentElement) el.roster.append(awayRow);
+    updateAwayButton();
+    on(el.roster, "click", (e) => {
+      const button = e.target.closest(".roster-voice");
+      if (!button || button.disabled) return;
+      button.blur();
+      // The visitor's own mark mutes and unmutes their microphone; anyone else's mutes them for this visitor.
+      if (button.dataset.self === "true") BL.voice.toggle();
+      else BL.voice.muteLocal(button.dataset.login, button.getAttribute("aria-pressed") !== "true");
+    });
+    on(awayButton, "click", () => {
+      showAway = !showAway;
+      awayButton.setAttribute("aria-expanded", String(showAway));
+      for (const row of rosterRows.values()) if (row.state.dataset.state === "away") row.li.hidden = !showAway && !row.online;
+      updateAwayButton();
+    });
+    // Online players lead the roster, by their activity's stamp; an away player who is online is never folded away.
+    const rankOf = (row) => row.online ? ONLINE_RANK : ROSTER_ORDER[row.state.dataset.state];
+    const countAway = () => {
+      awayCount = onlineCount = 0;
+      for (const row of rosterRows.values()) {
+        if (row.online) onlineCount++;
+        else if (row.state.dataset.state === "away") awayCount++;
+      }
+      updateAwayButton();
+    };
     const placeRosterRow = (row) => {
-      let before = null;
+      const rank = rankOf(row), stamp = stampOf(row.contributor);
+      let before = rank === ROSTER_ORDER.away ? null : awayRow;
       for (const sibling of el.roster.children) {
-        if (sibling === row.li) continue;
+        if (sibling === row.li || sibling === awayRow) continue;
         const other = rosterRows.get(sibling.dataset.name);
-        if (other.contributor.lastContributionAt < row.contributor.lastContributionAt ||
-          other.contributor.lastContributionAt === row.contributor.lastContributionAt && other.rosterIndex > row.rosterIndex) { before = sibling; break; }
+        const otherRank = rankOf(other), otherStamp = stampOf(other.contributor);
+        if (otherRank > rank) { before = otherRank === ROSTER_ORDER.away ? awayRow : sibling; break; }
+        if (otherRank === rank && (otherStamp < stamp || otherStamp === stamp && other.rosterIndex > row.rosterIndex)) { before = sibling; break; }
       }
       if (before) {
         if (row.li.nextElementSibling !== before) el.roster.insertBefore(row.li, before);
       } else if (el.roster.lastElementChild !== row.li) el.roster.append(row.li);
     };
-    const setRosterRow = (name, _stateKey, _ageText, online = false) => {
+    // A scene's local driver needs a signed-in account; remote drivers and the room's
+    // signed-in identities remain online independently. A change repaints the dot and moves the row.
+    const showOnline = (row) => {
+      const online = row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline;
+      if (row.online === online) return false;
+      row.online = online;
+      row.presence.dataset.online = online ? "true" : "false";
+      row.presence.title = online ? "Online" : "Offline";
+      row.presence.setAttribute("aria-label", row.presence.title);
+      row.li.hidden = row.state.dataset.state === "away" && !showAway && !online;
+      countAway();
+      return true;
+    };
+    const setRosterRow = (name, _stateKey, _ageText, online = false, remoteOnline = false) => {
       const row = rosterRows.get(name);
       if (!row) return;
       // Gameplay can put an Ooga to work or sleep; this board follows the
       // contributor's latest recorded activity instead.
       const activity = BL.contributors.contributionStateFor(row.contributor);
       const ageText = BL.contributors.contributionAgeLabel(row.contributor);
+      let moved = false;
       if (row.state.dataset.state !== activity) {
         row.state.dataset.state = activity;
         row.state.firstChild.data = STATE_LABELS[activity] || activity;
+        row.li.hidden = activity === "away" && !showAway && !row.online;
+        countAway();
+        moved = true;
       }
       if (row.age.firstChild.data !== ageText) row.age.firstChild.data = ageText;
-      if (row.online !== online) {
-        row.online = online;
-        row.presence.dataset.online = online ? "true" : "false";
-        row.presence.title = online ? "Online" : "Offline";
-        row.presence.setAttribute("aria-label", row.presence.title);
+      row.sceneOnline = online;
+      row.remoteOnline = remoteOnline;
+      if (showOnline(row)) moved = true;
+      const stamp = stampOf(row.contributor);
+      if (row.placedStamp !== stamp) {
+        row.placedStamp = stamp;
+        moved = true;
       }
-      placeRosterRow(row);
+      if (moved) placeRosterRow(row);
     };
-    // Seed empty text nodes so later updates only mutate text, never the DOM.
-    for (const node of [el.meterCount, el.meterForecast]) if (!node.firstChild) node.append("");
-    let shownBananas = -1, shownWidth = "", shownBand = "", shownForecast = null;
-    const setMeter = (level, capacity, forecastText) => {
-      const percent = Math.min(100, Math.max(0, level / capacity * 100));
-      const width = `${percent}%`;
-      if (width !== shownWidth) {
-        shownWidth = width;
-        el.meterFill.style.width = width;
-        el.meterFill.parentElement.setAttribute("aria-valuenow", String(Math.round(percent)));
-      }
-      const band = level < capacity * 0.15 ? "low" : level < capacity * 0.4 ? "mid" : "ok";
-      if (band !== shownBand) el.meterFill.dataset.level = shownBand = band;
-      const bananas = Math.floor(level);
-      if (bananas !== shownBananas) {
-        shownBananas = bananas;
-        const count = BANANA_COUNT.format(bananas);
-        el.meterCount.firstChild.data = count;
-      }
-      if (forecastText !== shownForecast) el.meterForecast.firstChild.data = shownForecast = forecastText;
+    // The page-level pass marks rows online from the room and moves only those that changed.
+    liveRows = rosterRows;
+    liveOnline = (row) => {
+      if (showOnline(row)) placeRosterRow(row);
     };
-    const setStats = ({ totalSats, donations }) => {
-      el.statDonations.textContent = String(donations);
-      el.statSats.textContent = formatLarge(totalSats);
+    showVoices();
+    // Value the donated sats at the current price; donor rankings retain their receipt prices.
+    const showBananaRate = () => {
+      if (document.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
+      const rate = currentDonationRate(), total = donationValueText();
+      const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
+      const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
+      const price = rate ? `$${DONOR_BANANAS.format(rate.usdPerBtc)}` : "—";
+      const exchange = rate ? `≈ ${DONOR_BANANAS.format(1e8 / rate.usdPerBtc)} sats` : "— sats";
+      if (el.bananaRateLabel.dataset.tone !== tone) el.bananaRateLabel.dataset.tone = tone;
+      if (el.bananaRateLabel.textContent !== label) el.bananaRateLabel.textContent = label;
+      if (el.bananaBtcPrice.textContent !== price) el.bananaBtcPrice.textContent = price;
+      if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
+      if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
+    };
+    let stopBananaRate = null, pileValueVisible = false;
+    const watchBananaRate = () => {
+      const visible = !document.hidden && (pileValueVisible || !el.bananaPanel.hidden && el.sheet.dataset.open === "true");
+      if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
+      else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
+      if (visible) showBananaRate();
+    };
+    const setPileValueVisible = (visible) => {
+      if (pileValueVisible === visible) return;
+      pileValueVisible = visible;
+      watchBananaRate();
+    };
+    const bananaRateObserver = new MutationObserver(watchBananaRate);
+    bananaRateObserver.observe(el.bananaPanel, { attributes: true, attributeFilter: ["hidden"] });
+    bananaRateObserver.observe(el.sheet, { attributes: true, attributeFilter: ["data-open"] });
+    on(document, "visibilitychange", watchBananaRate);
+    listeners.push(() => {
+      bananaRateObserver.disconnect();
+      if (stopBananaRate) stopBananaRate();
+    });
+    watchBananaRate();
+    // A fixed pool, so the DOM never grows with donations.
+    const recentRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
+      const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
+      const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
+      // Every text node exists from the start, so filling a row later adds nothing to the DOM.
+      const amountText = document.createTextNode(""), messageText = document.createTextNode("");
+      name.className = "banana-recent-name";
+      badge.className = "banana-verified";
+      badge.textContent = "✓";
+      badge.title = "Signed in with GitHub using this donor name";
+      badge.setAttribute("role", "img");
+      badge.setAttribute("aria-label", "GitHub name confirmed");
+      badge.hidden = true;
+      amount.className = "banana-amount";
+      message.className = "banana-recent-message";
+      message.hidden = true;
+      name.append(label, badge);
+      amount.append(amountText);
+      message.append(messageText);
+      li.append(name, amount, message);
+      li.hidden = true;
+      el.bananaRecent.append(li);
+      return { li, name, label, badge, amountText, message, messageText };
+    });
+    // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
+    const RECENT_BAR_KEY = "ooga-recent-bar";
+    let recentBarOnly = false;
+    try { recentBarOnly = localStorage.getItem(RECENT_BAR_KEY) === "1"; } catch { /* no storage: shown unfiltered */ }
+    el.bananaRecentBar.checked = recentBarOnly;
+    on(el.bananaRecentBar, "change", () => {
+      recentBarOnly = el.bananaRecentBar.checked;
+      try { localStorage.setItem(RECENT_BAR_KEY, recentBarOnly ? "1" : "0"); } catch { /* kept for this visit alone */ }
+      refreshDonors(true);
+      el.bananaRecentBar.blur();
+    });
+    let shownTally, shownBoard, shownRecent, shownReal, shownNetwork, shownOpen, shownBar;
+    const refreshDonors = (force = false) => {
+      const { real, state, testNetwork, messageMinSats: bar } = BL.donations;
+      showBananaRate();
+      if (!force && shownTally === state.tally && shownBoard === state.board && shownRecent === state.recent && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open && shownBar === bar) return;
+      shownTally = state.tally; shownBoard = state.board; shownRecent = state.recent; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open; shownBar = bar;
+      const tally = real ? state.tally : donationStats;
+      // The chip says whose figures these are: this browser's demo, a test network's, the feed still loading,
+      // donations closed, or the island's live feed.
+      const tone = !real ? "idle" : testNetwork ? "test" : !tally ? "wait" : state.open === false ? "closed" : "live";
+      el.bananaSource.dataset.tone = tone;
+      el.bananaSource.textContent = tone === "idle" ? "Demo" : tone === "test" ? `Test · ${testNetwork}` : tone === "wait" ? "Loading" : tone === "closed" ? "Closed" : "Live";
+      el.bananaSource.title = tone === "idle" ? "Demo donations saved in this browser" : tone === "test" ? `Test donations on ${testNetwork}, not real bitcoin`
+        : tone === "wait" ? "Waiting for the island’s donation feed" : tone === "closed" ? "Donations are closed for now" : "The island’s donation feed";
+      el.statDonations.textContent = tally ? BANANA_COUNT.format(real ? tally.count : tally.donations) : "—";
+      el.statSats.textContent = tally ? BANANA_COUNT.format(real ? tally.sats : tally.totalSats) : "—";
+      const entries = real ? donorUnit === "sats" ? state.boardSats : state.board : donationStats?.donors;
+      const missingSats = donorUnit === "sats" && (real && state.board !== null && entries === null || entries?.some((entry) => entry.sats === null));
+      // The API ranks before rounding bananas, with stable account-id ties. Keep that order.
+      const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
+        b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
+        || a.handle.localeCompare(b.handle));
+      el.bananaLeaders.replaceChildren();
+      for (let i = 0; i < Math.min(10, ranked.length); i++) {
+        const entry = ranked[i], row = document.createElement("li");
+        const rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
+        rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
+        name.className = "banana-donor"; name.textContent = entry.handle ? `@${entry.handle}` : "Anonymous";
+        if (!entry.handle) name.dataset.anon = "true";
+        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        row.append(rank, name, amount); el.bananaLeaders.append(row);
+      }
+      el.bananaEmpty.hidden = ranked.length > 0;
+      el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
+        : real && !entries ? "Loading the donor leaderboard…"
+        : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
+      // The recent list: the newest first, its orange check only on the API's word that the donor's GitHub login
+      // matched the name, into the fixed rows.
+      const all = real ? state.recent || [] : donationStats?.recentDonations || [];
+      const recent = recentBarOnly ? all.filter((entry) => entry.sats >= bar) : all;
+      el.bananaRecentBarLabel.textContent = `${BANANA_COUNT.format(bar)} sats and up only`;
+      el.donationMessageLabel.textContent = `Banana message (up to 280 characters, with a tip of ${BANANA_COUNT.format(bar)} sats or more)`;
+      for (let i = 0; i < recentRows.length; i++) {
+        const row = recentRows[i], entry = recent[i];
+        row.li.hidden = !entry;
+        if (!entry) continue;
+        row.label.data = entry.handle ? `@${entry.handle}` : "Anonymous";
+        row.name.dataset.anon = String(!entry.handle);
+        row.badge.hidden = !(real && entry.verified);
+        row.amountText.data = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        const message = BL.donations.carried(entry.sats, entry.message);
+        row.message.hidden = !message;
+        row.messageText.data = message;
+      }
+      el.bananaRecentEmpty.hidden = recent.length > 0;
+      el.bananaRecentEmpty.textContent = recentBarOnly && all.length ? `None of the latest tips reached ${BANANA_COUNT.format(bar)} sats.`
+        : real ? "Recent donations will appear here as they arrive." : "New demo donations will appear here.";
+      el.bananaBoardNote.textContent = !real ? "Demo donations in this browser only. Earlier tips have no donor history."
+        : testNetwork ? `Test donations on ${testNetwork}. Leaderboard values are recorded when paid.`
+        : "Leaderboard totals use each donation's recorded value.";
+      el.bananaBoardUnit.textContent = donorUnit === "sats" ? "Sats" : "Bananas";
+      el.bananaLeaders.setAttribute("aria-label", `Top donors by ${donorUnit}`);
+      for (const button of el.donorUnits) button.setAttribute("aria-pressed", String(button.dataset.donorUnit === donorUnit));
+    };
+    for (const button of el.donorUnits) on(button, "click", () => {
+      donorUnit = button.dataset.donorUnit;
+      refreshDonors(true);
+    });
+    listeners.push(BL.donations.subscribeState(refreshDonors));
+    liveDonors = refreshDonors;
+    refreshDonors(true);
+    const setStats = (stats) => {
+      setDonationStats(stats);
     };
     let actLabel = el.act.textContent;
     const setAct = (label) => {
@@ -375,9 +667,22 @@
       el.act.textContent = label;
     };
     let actionHandler = null;
-    const DETACHED_PRESETS = ["pile", "lab", "mirror", "underground", "basement"];
-    const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement" };
+    const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement", mempool: "Mempool", factory: "LN Factory", arcade: "Ooga Arcade", bca: "B.C.A.", gate: "North gate", bifrost: "₿IFRÖST", timechain: "TC Sphere" };
+    let destinationNames = [];
+    let destinationIndex = -1;
     let detachedPreset = "pile", detachedNameShown = false, detachedSelectionShown = false, areaLabel = "";
+    const setDestinations = (names) => {
+      destinationNames = names.filter(name => DETACHED_NAMES[name]);
+      destinationIndex = destinationNames.indexOf(detachedPreset);
+      el.modeDestination.hidden = !modeVisible || !destinationNames.length;
+    };
+    const cycleDestinations = () => {
+      if (!destinationNames.length || !actionHandler) return;
+      // A refused arrival must not trap the next press at the same place.
+      // Only a successful navigation updates the displayed destination.
+      destinationIndex = (destinationIndex + 1) % destinationNames.length;
+      actionHandler("mode-preset", destinationNames[destinationIndex]);
+    };
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
     const showAreaLabel = () => {
       if (el.modeDestinationName.textContent !== areaLabel) el.modeDestinationName.textContent = areaLabel;
@@ -392,7 +697,6 @@
       detachedNameShown = false;
       detachedSelectionShown = false;
       showAreaLabel();
-      for (const dot of el.modeDestinationDots) dot.dataset.current = "false";
     };
     const setAreaLabel = (name, position = null) => {
       areaLabel = name;
@@ -403,20 +707,59 @@
     const setDetachedView = (name, announce = false, position = null) => {
       if (!DETACHED_NAMES[name]) return;
       detachedPreset = name;
+      destinationIndex = destinationNames.indexOf(name);
       destinationAnchored = !!position;
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
-      for (const dot of el.modeDestinationDots) dot.dataset.current = String(dot.dataset.detachedPreset === name);
       if (!announce) return;
       el.modeDestinationName.textContent = DETACHED_NAMES[name];
       detachedNameShown = true;
       el.modeDestinationName.classList.add("show");
     };
-    const nextDetachedView = () => DETACHED_PRESETS[(DETACHED_PRESETS.indexOf(detachedPreset) + 1) % DETACHED_PRESETS.length];
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false;
     let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
+    let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
+    const retake = { actor: null, gorilla: false };
+    const syncRetakeActor = () => {
+      const actor = retake.actor;
+      const shown = modeVisible && !!actor && !modeCave && !gorillaEntry;
+      if (el.ownOoga.hidden === shown) el.ownOoga.hidden = !shown;
+      if (!shown) return;
+      const cave = retake.gorilla ? actor.owner : actor, gorilla = retake.gorilla ? actor.gorilla : null;
+      const geometry = gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry;
+      const portraitGeometry = gorilla ? geometry : cave.portraitHead;
+      if (actor !== retakePortraitActor || geometry !== retakeGeometry || portraitGeometry !== retakePortraitGeometry) {
+        renderFaceIcon(el.ownOogaFace, cave, gorilla);
+        el.ownOoga.dataset.portrait = "face-crop";
+        if (actor !== retakePortraitActor) {
+          const name = cave.traits.display;
+          const label = gorilla ? `Return to ${name}'s gorilla` : `Return to ${name}, Ooga`;
+          el.ownOoga.setAttribute("aria-label", label);
+          el.ownOoga.title = label;
+          el.ownOoga.dataset.gorilla = String(!!gorilla);
+          el.ownOogaHealth.setAttribute("aria-label", `${gorilla ? "Gorilla" : "Ooga"} health: ${name}`);
+        }
+        retakePortraitActor = actor;
+        retakeGeometry = geometry;
+        retakePortraitGeometry = portraitGeometry;
+      }
+      const source = actor.health, max = source ? source.max : BL.crew.HEALTH_MAX;
+      const health = source ? Math.max(0, Math.min(max, source.value)) : max;
+      if (health !== retakeHealth || max !== retakeHealthMax) {
+        retakeHealth = health; retakeHealthMax = max;
+        el.ownOogaHealthFill.style.transform = `scaleY(${health / max})`;
+        el.ownOogaHealth.setAttribute("aria-valuemax", String(max));
+        el.ownOogaHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
+      }
+    };
+    // Legacy account updates never replace the last actor successfully controlled.
+    const setOwnOoga = () => syncRetakeActor();
     const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
+      modeCave = gorilla ? null : cave;
+      modeVisible = visible;
+      if (gorillaEntry || cave) { retake.actor = gorillaEntry || cave; retake.gorilla = !!gorillaEntry; }
+      syncRetakeActor();
       if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       if (!visible) fadeDetachedName(true);
@@ -424,7 +767,8 @@
       const stateChanged = combat !== modeCombat || view !== modeView;
       const showMode = visible && selected;
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
-      if (el.modeDestination.hidden === visible) el.modeDestination.hidden = !visible;
+      const showDestinations = visible && destinationNames.length > 0;
+      if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
       const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
       if (selected && (identityChanged || geometry !== modeGeometry)) {
         renderFaceIcon(el.modeFace, cave, gorilla);
@@ -488,8 +832,8 @@
         primarySelected = selected; primaryAiming = aiming;
         el.primary.dataset.equipped = String(selected);
         el.primary.setAttribute("aria-pressed", String(selected));
-        el.primary.title = !selected ? "Equip primary melee weapon (1)" : "Melee weapon · 0.2s between hits for full power (1)";
-        el.primary.setAttribute("aria-label", !selected ? "Equip primary melee weapon" : "Melee weapon · allow 0.2 seconds between hits for full power");
+        el.primary.title = !selected ? "Equip primary melee weapon (1)" : "Melee weapon · 0.2s between swings for full power · hold for double damage (1)";
+        el.primary.setAttribute("aria-label", !selected ? "Equip primary melee weapon" : "Melee weapon · allow 0.2 seconds between swings for full power, then hold for double damage");
       }
       if (held !== primaryHeld) {
         primaryHeld = held;
@@ -633,14 +977,14 @@
         : "Equip the AK-47 to swap magazines";
       button.setAttribute("aria-label", `${count} spare magazine${count === 1 ? "" : "s"}; ${high} of 30 rounds${count > 1 ? ` fullest, ${low} of 30 rounds lowest` : ""}${reloadingIndex >= 0 ? "; reloading" : canSwap ? "; click to use the fullest spare" : ""}`);
       if (high !== magazineHigh) {
-        const filled = Math.floor(high / 6), previous = Math.floor(magazineHigh / 6);
+        const filled = Math.round(high / 6), previous = Math.round(magazineHigh / 6);
         for (let i = 0; i < el.magazineBananas.length; i++) if (magazineHigh < 0 || (i < filled) !== (i < previous)) el.magazineBananas[i].dataset.filled = String(i < filled);
         magazineHigh = high;
         el.magazineAmmo.firstChild.data = String(high);
         button.dataset.level = high === 0 ? "empty" : high <= 5 ? "low" : "ok";
       }
       if (low !== magazineLow) {
-        const filled = Math.floor(low / 6), previous = Math.floor(magazineLow / 6);
+        const filled = Math.round(low / 6), previous = Math.round(magazineLow / 6);
         for (let i = 0; i < el.magazineRearBananas.length; i++) if (magazineLow < 0 || (i < filled) !== (i < previous)) el.magazineRearBananas[i].dataset.filled = String(i < filled);
         magazineLow = low;
         el.magazineLowAmmo.firstChild.data = String(low);
@@ -680,7 +1024,7 @@
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
     };
     const setGorilla = (entry, view = "orbit", combat = false) => {
-      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) return;
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) { syncRetakeActor(); return; }
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
@@ -692,23 +1036,32 @@
       refreshWeaponSummary();
       setMode(null);
     };
+    const setGorillaSmashPower = (power, returning = false, throwing = false) => {
+      const percent = Math.round(Math.max(0, Math.min(throwing ? 1 : 5, power)) * (throwing ? 100 : 40));
+      el.gorillaSmash.dataset.returning = String(returning);
+      el.gorillaStrengthFill.style.transform = `scaleY(${percent / (throwing ? 100 : 200)})`;
+      el.gorillaStrength.setAttribute("aria-label", throwing ? "Ooga throw power" : "Ground smash power");
+      el.gorillaStrength.setAttribute("aria-valuemax", throwing ? "100" : "200");
+      el.gorillaStrength.setAttribute("aria-valuenow", String(percent));
+      el.gorillaStrength.setAttribute("aria-valuetext", throwing ? `${percent}% throw power` : `${percent}% of normal smash damage`);
+      el.gorillaSmash.setAttribute("aria-label", throwing ? "Throw Ooga; hold click to charge, release to throw" : "Ground smash; hold for double damage");
+      el.gorillaSmash.title = throwing ? "Throw Ooga · hold click to charge, release to throw" : "Ground smash · hold for double damage (1)";
+    };
     const setSubtitle = (text) => {
       el.subtitle.textContent = text;
     };
     const onAction = (fn) => {
       actionHandler = fn;
     };
+    // The Worker build marks its pages so a failed account lookup cannot turn a real tip into a demo.
+    const workerPage = document.documentElement.dataset.workerPage === "1";
     const openFeed = () => {
-      if (!el.feed.open) el.feed.showModal();
+      if (!BL.donations.real && (workerPage || BL.net.state.backend)) {
+        toast("Donations are unavailable right now. Try again shortly.");
+        return;
+      }
+      BL.donationPopup.open(!BL.donations.real);
     };
-    const closeFeed = () => {
-      if (el.feed.open) el.feed.close();
-    };
-    on(el.feed, "keydown", (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      closeFeed();
-    });
     const floatingBoards = [];
     const stackBoards = () => {
       for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].setLayer(20 + i);
@@ -739,11 +1092,14 @@
         boardFilterRepos: "board-filter-repos", boardFilterUsers: "board-filter-users", boardFilterTypes: "board-filter-types"
       };
       for (const key in ids) el[key] = node.querySelector(`[id="${ids[key]}"]`);
-      const boardNav = node.querySelector(".board-nav");
+      const boardNav = node.querySelector(".board-nav"), boardCenter = node.querySelector(".board-center");
       if (floatingId) {
         node.id += `-${floatingId}`;
         for (const child of node.querySelectorAll("[id]")) child.id += `-${floatingId}`;
         node.setAttribute("aria-labelledby", el.boardTitle.id);
+        el.boardScreen.tabIndex = 0;
+        el.boardScreen.setAttribute("role", "button");
+        el.boardScreen.setAttribute("aria-label", "Toggle Oogatron header and footer");
       }
       el.boardFilter.setAttribute("aria-controls", el.boardFilterMenu.id);
       el.boardFilterRepos.setAttribute("aria-controls", el.boardFilterList.id);
@@ -756,11 +1112,12 @@
       };
       // Each window copies a readable board's canvas and owns its controls.
       // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
-      // `go(index)`, plus an optional `wide`, which widens the dialog on desktop. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
+      // `go(index)`, plus optional `wide` and `captionAbove` layouts. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
       // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
       // `updateBoard` repaints whenever the open board's version moves.
       // A `floating` board also supplies `paused` and `setPaused`, and keeps island input available.
       let board = null, boardShown = -1, boardDots = -1;
+      let controlsHidden = saved?.controlsHidden === true;
       let filterTab = "repos", filterShown = -1;
       const filterTabs = [el.boardFilterRepos, el.boardFilterUsers, el.boardFilterTypes];
       const typeLabels = { commit: "Commits", pr: "Pull requests", review: "Reviews", merge: "Merges", issue: "Issues", comment: "Comments" };
@@ -816,6 +1173,13 @@
       const boardRatio = 550 / 368;
       const width = saved?.width ?? lastBoard?.width ?? lastBoardWidth;
       const boardWindow = { x: saved?.x ?? 0, y: saved?.y ?? 0, width, height: width / boardRatio, placed: !!saved };
+      const boardBounds = { left: 0, top: 0, right: 0, bottom: 0 };
+      const overlapsBoard = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      const readBoardBounds = () => {
+        const r = el.boardScreen.getBoundingClientRect();
+        boardBounds.left = r.left; boardBounds.top = r.top;
+        boardBounds.right = r.right; boardBounds.bottom = r.bottom;
+      };
       const interactBoard = () => {
         if (!floatingId) return;
         lastBoard = controller;
@@ -829,6 +1193,29 @@
         stackBoards();
         scheduleBoardSave();
       };
+      const paintBoardControls = () => {
+        el.board.classList.toggle("board-controls-hidden", controlsHidden);
+        el.boardScreen.setAttribute("aria-expanded", String(!controlsHidden));
+        el.boardScreen.title = controlsHidden ? "Show header and footer" : "Hide header and footer";
+      };
+      const toggleBoardControls = () => {
+        if (!board?.floating) return;
+        interactBoard();
+        controlsHidden = !controlsHidden;
+        showFilters(false);
+        paintBoardControls();
+        scheduleBoardSave();
+      };
+      on(el.boardScreen, "click", () => {
+        if (!board?.floating) return;
+        toggleBoardControls();
+        el.boardScreen.blur();
+      });
+      on(el.boardScreen, "keydown", (e) => {
+        if (!board?.floating || e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault(); e.stopPropagation();
+        if (!e.repeat) toggleBoardControls();
+      });
       let boardPointer = -1, boardHandle = null, boardResizing = false;
       let boardStartX = 0, boardStartY = 0, boardStartLeft = 0, boardStartTop = 0, boardStartWidth = 0;
       const layoutBoard = () => {
@@ -837,17 +1224,92 @@
         b.width = Math.min(maxWidth, Math.max(Math.min(260, maxWidth), b.width));
         b.height = b.width / boardRatio;
         b.x = Math.max(0, Math.min(w - b.width, b.x));
-        b.y = Math.max(0, Math.min(h - b.height, b.y));
         el.board.style.width = `${b.width}px`;
         el.board.style.height = `${b.height}px`;
         el.board.style.left = `${b.x}px`;
-        el.board.style.top = `${b.y}px`;
         el.board.style.setProperty("--board-scale", String(Math.min(b.width, 550) / 440));
+        // The footer may sit below the viewport; keep the black display itself in view.
+        const screenBottom = el.boardScreen.getBoundingClientRect().bottom - el.board.getBoundingClientRect().top;
+        b.y = Math.max(0, Math.min(h - screenBottom, b.y));
+        el.board.style.top = `${b.y}px`;
+        readBoardBounds();
         if (!el.boardFilterMenu.hidden) positionFilters();
       };
+      const moveBoard = (x, y) => {
+        const b = boardWindow, left = b.x, top = b.y;
+        const r = { ...boardBounds };
+        b.x = x; b.y = y;
+        layoutBoard();
+        let dx = b.x - left, dy = b.y - top, movedX = 0, movedY = 0;
+        // Sweep the black display, then slide along contact. A fast pointer must
+        // not jump through a neighbour, and transparent controls are not walls.
+        for (let pass = 0; pass < 3 && (dx || dy); pass++) {
+          let time = 1, stopX = false, stopY = false;
+          for (const popup of floatingBoards) {
+            if (popup === controller) continue;
+            const other = popup.bounds;
+            // Old or overcrowded layouts must still allow an overlap to separate.
+            if (overlapsBoard(r, other)) continue;
+            const l = r.left + movedX, t = r.top + movedY, right = r.right + movedX, bottom = r.bottom + movedY;
+            if (!dx && (right <= other.left || l >= other.right) || !dy && (bottom <= other.top || t >= other.bottom)) continue;
+            const enterX = dx > 0 ? (other.left - right) / dx : dx < 0 ? (other.right - l) / dx : -Infinity;
+            const leaveX = dx > 0 ? (other.right - l) / dx : dx < 0 ? (other.left - right) / dx : Infinity;
+            const enterY = dy > 0 ? (other.top - bottom) / dy : dy < 0 ? (other.bottom - t) / dy : -Infinity;
+            const leaveY = dy > 0 ? (other.bottom - t) / dy : dy < 0 ? (other.top - bottom) / dy : Infinity;
+            const enter = Math.max(enterX, enterY), leave = Math.min(leaveX, leaveY);
+            if (enter < 0 || enter > time || enter >= leave) continue;
+            if (enter < time) { stopX = false; stopY = false; }
+            time = enter;
+            stopX ||= enterX >= enterY;
+            stopY ||= enterY >= enterX;
+          }
+          // Leave a subpixel clearance so layout rounding cannot turn contact
+          // into an existing overlap on the next pointer event.
+          const travelX = dx * time, travelY = dy * time;
+          movedX += travelX - (stopX ? Math.sign(travelX) * Math.min(0.02, Math.abs(travelX)) : 0);
+          movedY += travelY - (stopY ? Math.sign(travelY) * Math.min(0.02, Math.abs(travelY)) : 0);
+          dx = stopX ? 0 : dx * (1 - time);
+          dy = stopY ? 0 : dy * (1 - time);
+        }
+        b.x = left + movedX; b.y = top + movedY;
+        el.board.style.left = `${b.x}px`; el.board.style.top = `${b.y}px`;
+        readBoardBounds();
+      };
       const resizeBoard = (width) => {
-        const maxWidth = Math.min(window.innerWidth - boardWindow.x, (window.innerHeight - boardWindow.y) * boardRatio);
+        const before = { ...boardWindow }, bounds = { ...boardBounds };
+        const maxWidth = window.innerWidth - boardWindow.x;
         boardWindow.width = Math.min(maxWidth, Math.max(Math.min(260, maxWidth), width));
+        layoutBoard();
+        for (const popup of floatingBoards) {
+          if (popup === controller || overlapsBoard(bounds, popup.bounds) || !overlapsBoard(boardBounds, popup.bounds)) continue;
+          boardWindow.x = before.x; boardWindow.y = before.y; boardWindow.width = before.width;
+          layoutBoard();
+          break;
+        }
+      };
+      const placeBoard = () => {
+        if (!floatingBoards.some(popup => popup !== controller && overlapsBoard(boardBounds, popup.bounds))) return;
+        const b = boardWindow, width = boardBounds.right - boardBounds.left, height = boardBounds.bottom - boardBounds.top;
+        const offsetX = boardBounds.left - b.x, offsetY = boardBounds.top - b.y;
+        const maxX = window.innerWidth - b.width, maxY = window.innerHeight - offsetY - height;
+        const xs = [b.x, 0, maxX], ys = [b.y, 0, maxY];
+        for (const popup of floatingBoards) {
+          if (popup === controller) continue;
+          xs.push(popup.bounds.left - width - offsetX - 0.02, popup.bounds.right - offsetX + 0.02);
+          ys.push(popup.bounds.top - height - offsetY - 0.02, popup.bounds.bottom - offsetY + 0.02);
+        }
+        const candidate = { left: 0, top: 0, right: 0, bottom: 0 };
+        let best = Infinity, bestX = b.x, bestY = b.y;
+        for (const x of xs) for (const y of ys) {
+          if (x < 0 || x > maxX || y < 0 || y > maxY) continue;
+          const distance = (x - b.x) ** 2 + (y - b.y) ** 2;
+          if (distance >= best) continue;
+          candidate.left = x + offsetX; candidate.top = y + offsetY;
+          candidate.right = candidate.left + width; candidate.bottom = candidate.top + height;
+          if (floatingBoards.some(popup => popup !== controller && overlapsBoard(candidate, popup.bounds))) continue;
+          best = distance; bestX = x; bestY = y;
+        }
+        b.x = bestX; b.y = bestY;
         layoutBoard();
       };
       const finishBoardPointer = () => {
@@ -889,9 +1351,7 @@
           const dx = e.clientX - boardStartX, dy = e.clientY - boardStartY;
           resizeBoard(boardStartWidth + (dx + dy / boardRatio) / (1 + 1 / (boardRatio * boardRatio)));
         } else {
-          boardWindow.x = boardStartLeft + e.clientX - boardStartX;
-          boardWindow.y = boardStartTop + e.clientY - boardStartY;
-          layoutBoard();
+          moveBoard(boardStartLeft + e.clientX - boardStartX, boardStartTop + e.clientY - boardStartY);
         }
       });
       const endBoardPointer = (e) => {
@@ -904,7 +1364,7 @@
       on(el.board, "lostpointercapture", endBoardPointer);
       on(window, "blur", finishBoardPointer);
       on(window, "resize", () => {
-        if (board?.floating) { layoutBoard(); scheduleBoardSave(); }
+        if (board?.floating) { layoutBoard(); placeBoard(); scheduleBoardSave(); }
       });
       on(el.boardResize, "keydown", (e) => {
         let step;
@@ -932,8 +1392,8 @@
         el.boardCaption.textContent = board.caption;
         el.boardNote.textContent = board.note || "";
         el.boardNote.hidden = !!board.floating || !board.note;
+        if (board.floating || board.carousel) paintBoardPause();
         if (board.floating) {
-          paintBoardPause();
           el.boardRollup.checked = board.rollup;
           el.boardFilter.dataset.active = String(board.rollup || board.filters.repos !== null || board.filters.users !== null || board.filters.types !== null);
           if (!el.boardFilterMenu.hidden && filterShown !== board.filterVersion) paintFilters();
@@ -965,13 +1425,29 @@
         letterSign(el.boardTitle, board.title);
         el.board.classList.toggle("board-wide", !!board.wide);
         el.board.classList.toggle("board-floating", !!board.floating);
-        if (board.floating) el.boardHead.insertBefore(el.boardDots, el.boardHead.lastElementChild);
-        else boardNav.after(el.boardDots);
-        el.boardCaption.hidden = !!board.floating;
-        el.boardPause.hidden = el.boardResize.hidden = !board.floating;
+        el.board.classList.toggle("board-caption-above", !!board.captionAbove);
+        el.board.classList.toggle("board-carousel", !!board.carousel);
+        if (board.floating) {
+          paintBoardControls();
+          boardCenter.prepend(el.boardCaption);
+          el.boardHead.insertBefore(el.boardDots, el.boardHead.lastElementChild);
+        } else if (board.carousel) {
+          el.boardScreen.before(el.boardCaption);
+          boardCenter.prepend(el.boardPause);
+          el.boardHead.insertBefore(el.boardDots, el.boardHead.lastElementChild);
+        } else if (board.captionAbove) {
+          el.boardScreen.before(el.boardCaption);
+          boardCenter.prepend(el.boardDots);
+        } else {
+          boardCenter.prepend(el.boardCaption);
+          boardNav.after(el.boardDots);
+        }
+        el.boardCaption.hidden = !!board.floating || !!board.hideCaption;
+        el.boardPause.hidden = !board.floating && !board.carousel;
+        el.boardResize.hidden = !board.floating;
         el.boardFilter.hidden = !board.floating;
         showFilters(false);
-        el.boardHelp.hidden = !!board.floating;
+        el.boardHelp.hidden = !!board.floating || !board.help;
         el.boardHelp.textContent = board.help;
         if (board.floating) {
           if (!boardWindow.placed) {
@@ -980,7 +1456,6 @@
             boardWindow.y = (window.innerHeight - boardWindow.height) / 2 + offset;
             boardWindow.placed = true;
           }
-          layoutBoard();
         } else {
           el.board.removeAttribute("style");
         }
@@ -992,6 +1467,7 @@
             document.activeElement?.blur();
           } else el.board.showModal();
         }
+        if (board.floating) { layoutBoard(); placeBoard(); }
       };
       const closeBoard = () => {
         finishBoardPointer();
@@ -1094,7 +1570,7 @@
         else if (button.dataset.action === "board-next") pageBoard(1);
         else if (button.dataset.action === "board-filter") showFilters(el.boardFilterMenu.hidden);
         else if (button.dataset.action === "board-filter-done") showFilters(false);
-        else if (button.dataset.action === "board-pause" && board?.floating) {
+        else if (button.dataset.action === "board-pause" && (board?.floating || board?.carousel)) {
           board.setPaused(!board.paused);
           paintBoardPause();
           scheduleBoardSave();
@@ -1102,9 +1578,11 @@
       });
       const controller = {
         open: openBoard, close: closeBoard, update: updateBoard,
+        escape() { if (!el.boardFilterMenu.hidden) showFilters(false); else closeBoard(); },
+        bounds: boardBounds,
         setLayer(layer) { el.board.style.zIndex = String(layer); },
         get width() { return boardWindow.width; },
-        snapshot() { return { x: boardWindow.x, y: boardWindow.y, width: boardWindow.width, screen: board.view, paused: board.paused, filters: board.filters, rollup: board.rollup }; },
+        snapshot() { return { x: boardWindow.x, y: boardWindow.y, width: boardWindow.width, screen: board.view, paused: board.paused, filters: board.filters, rollup: board.rollup, controlsHidden }; },
         dispose() {
           closeBoard();
           for (const off of boardListeners) off();
@@ -1183,9 +1661,9 @@
         entry.close();
       }
     }, true);
-    dismissOutside(el.feed, closeFeed);
     dismissOutside(el.recipe, closeRecipe);
     dismissOutside(el.board, () => mainBoard.close());
+    dismissOutside($("donation-popup"), () => BL.donationPopup.closeOutside());
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -1286,17 +1764,15 @@
       if (b === el.mode && e.detail !== 0) return;
       b.blur();
       if (b.dataset.action === "feed") openFeed();
-      else if (b.dataset.action === "feed-close") closeFeed();
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
-      else if (b === el.modeDestination) {
-        // The locked virtual cursor dispatches to the enclosing button.
-        // Resolve the dot at its screen coordinates as well as native targets.
-        const dot = e.target.closest("[data-detached-preset]")
-          || (e.detail > 0 ? document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-detached-preset]") : null);
-        actionHandler && actionHandler("mode-preset", dot ? dot.dataset.detachedPreset : nextDetachedView());
-      }
+      else if (b === el.modeDestination) cycleDestinations();
+      else if (b.dataset.action === "account-login") BL.net.login();
+      else if (b.dataset.action === "account-logout") BL.net.logout();
+      else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
+      else if (b.dataset.action === "account-voice") BL.voice.toggle();
+      else if (b.dataset.action === "account-voice-leave") BL.voice.stop();
       else actionHandler && actionHandler(b.dataset.action);
     });
     // A game's side panels fold away and come back from a tab on the screen's edge: a `data-fold`
@@ -1306,23 +1782,14 @@
       const panel = document.getElementById(b.dataset.fold);
       panel.dataset.folded = String(panel.dataset.folded !== "true");
     });
-    const toast = (text) => {
-      window.clearTimeout(toastTimer);
-      window.clearTimeout(toastHideTimer);
-      el.toast.textContent = text;
-      el.toast.hidden = false;
-      el.messageStack.append(el.toast);
-      el.toast.classList.add("show");
-      toastTimer = window.setTimeout(() => {
-        el.toast.classList.remove("show");
-        toastHideTimer = window.setTimeout(() => {
-          if (!el.toast.classList.contains("show")) el.toast.hidden = true;
-        }, MESSAGE_FADE_MS);
-      }, 2800);
-    };
     let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
-    let tipVisibility = null, tipSpeechTop = Infinity;
+    let tipVisibility = null, tipSpeechTop = Infinity, tipSpeechAlpha = 0;
     const tipScreen = { x: 0, y: 0, depth: 0 };
+    // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
+    // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
+    // before never needs the offset reads' forced layout again. A 0x0 read is a drag-hid tooltip
+    // (body.orbit-dragging / mine-dragging): never cached, so the first real hover measures again.
+    const tipSizeCache = new Map();
     const placeTooltip = (left, top) => {
       left = Math.round(left); top = Math.round(top);
       if (left === tipLeft && top === tipTop) return;
@@ -1330,8 +1797,8 @@
       el.tooltip.style.transform = `translate(${left}px, ${top}px)`;
     };
     const tooltip = {
-      show: (text, x, y, cave = null, noStatusDot = false) => {
-        if (cave !== tipCave) tipSpeechTop = Infinity;
+      show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
+        if (cave !== tipCave) { tipSpeechTop = Infinity; tipSpeechAlpha = 0; }
         tipCave = cave;
         const name = !!cave;
         const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
@@ -1352,16 +1819,26 @@
           tipText = text;
           tipState = "";
           el.tooltipText.textContent = text;
-          tipW = el.tooltip.offsetWidth;
-          tipH = el.tooltip.offsetHeight;
+          const size = tipSizeCache.get(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`);
+          if (size) {
+            tipW = size.w;
+            tipH = size.h;
+          } else {
+            tipW = el.tooltip.offsetWidth;
+            tipH = el.tooltip.offsetHeight;
+            if (tipW || tipH) {
+              if (tipSizeCache.size >= 64) tipSizeCache.clear();
+              tipSizeCache.set(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`, { w: tipW, h: tipH });
+            }
+          }
         }
         if (cave) {
           tooltip.update();
           return;
         }
         const w = tipW, h = tipH;
-        const left = Math.min(window.innerWidth - w - 8, x + 14);
-        const top = y + 18 + h > window.innerHeight ? y - h - 10 : y + 18;
+        const left = above ? Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)) : Math.min(window.innerWidth - w - 8, x + 14);
+        const top = above ? Math.max(8, y - h - 10) : y + 18 + h > window.innerHeight ? y - h - 10 : y + 18;
         placeTooltip(left, top);
       },
       setVisibility: (visibility) => {
@@ -1369,7 +1846,7 @@
         if (!visibility) tooltip.hide();
       },
       beginFrame: () => {
-        tipSpeechTop = Infinity;
+        tipSpeechTop = Infinity; tipSpeechAlpha = 0;
         tooltip.update(false);
       },
       update: (place = true) => {
@@ -1392,13 +1869,15 @@
         }
         el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
         if (el.tooltip.hidden || !place) return;
-        const top = Math.min(tipScreen.y - 8, tipSpeechTop - 6) - tipH;
+        // The name rests on the head and rises over a bubble only as far as the bubble shows, so a bubble fading
+        // in or out never leaves it hanging over empty space.
+        const rest = tipScreen.y - 2, top = rest + (Math.min(rest, tipSpeechTop - 6) - rest) * tipSpeechAlpha - tipH;
         placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), Math.max(8, top));
       },
       // The name sits above speech; reserve room for both near the top edge.
       speechSpace: (cave) => cave && cave === tipCave && !el.tooltip.hidden ? tipH + 6 : 0,
-      aboveSpeech: (cave, top) => {
-        if (cave && cave === tipCave) tipSpeechTop = Math.min(tipSpeechTop, top);
+      aboveSpeech: (cave, top, alpha = 1) => {
+        if (cave && cave === tipCave && top < tipSpeechTop) { tipSpeechTop = top; tipSpeechAlpha = Math.max(0, Math.min(1, alpha)); }
       },
       hide: () => {
         tipCave = null;
@@ -1439,49 +1918,143 @@
     const selectedSheetTab = () => el.tabs.find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab || "roster";
     const setSheetOpen = (open) => {
       el.sheet.dataset.open = String(open);
-      writeSheetState(open, selectedSheetTab());
+      writeSheetState(open, selectedSheetTab(), sheetHeight);
     };
+    // Registered before actor controls: a popup or the sheet takes one Escape
+    // before cursor capture or possession can change. Dialogs keep their own
+    // nested Escape actions (for example a board's filter menu).
+    on(window, "keydown", (e) => {
+      if (e.key !== "Escape" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+      // Chat owns IME state and first returns focus from its editor to its tab.
+      if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
+      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest("dialog[open]")) return;
+      let closed = false;
+      if (floatingBoards.length) {
+        floatingBoards[floatingBoards.length - 1].escape();
+        closed = true;
+      } else {
+        for (let i = outside.length - 1; i >= 0; i--) {
+          const entry = outside[i], node = entry.node;
+          if (node.tagName === "DIALOG" ? !node.open : node.hidden || !node.getClientRects().length) continue;
+          entry.close();
+          closed = true;
+          break;
+        }
+      }
+      if (!closed && el.sheet.dataset.open === "true" && el.sheet.getClientRects().length) {
+        if (el.sheet.contains(document.activeElement)) document.activeElement.blur();
+        setSheetOpen(false);
+        closed = true;
+      }
+      if (closed) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
     const selectTab = (name) => {
-      for (const t of el.tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+      for (const t of el.tabs) {
+        t.setAttribute("aria-selected", String(t.dataset.tab === name));
+        t.tabIndex = t.dataset.tab === name ? 0 : -1;
+      }
       for (const p of el.panels) p.hidden = p.dataset.panel !== name;
       setSheetOpen(true);
     };
-    for (const t of el.tabs) {
-      on(t, "click", () => {
-        const already = t.getAttribute("aria-selected") === "true" && el.sheet.dataset.open === "true";
-        if (already && window.matchMedia("(max-width: 720px)").matches) setSheetOpen(false);
-        else selectTab(t.dataset.tab);
-      });
-    }
     // A pull tab opens its own panel, and folds the sheet when that panel is already showing.
     const pull = (name) => {
       const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === name && t.getAttribute("aria-selected") === "true");
       if (showing) setSheetOpen(false);
       else selectTab(name);
     };
-    on(el.sheetToggle, "click", () => pull("roster"));
-    on(el.sheetBananas, "click", () => pull("bananas"));
+    for (const tab of el.tabs) on(tab, "click", () => pull(tab.dataset.tab));
+    on(el.sheetPanels, "keydown", (e) => {
+      let step = 0;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") step = 1;
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") step = -1;
+      else if (e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault(); e.stopPropagation();
+      const tabs = el.tabs.filter((tab) => !tab.hidden), index = tabs.indexOf(document.activeElement);
+      const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (index + step + tabs.length) % tabs.length;
+      selectTab(tabs[next].dataset.tab);
+      tabs[next].focus({ preventScroll: true });
+    });
+    const bottomSheet = window.matchMedia("(max-width: 720px), (max-height: 500px) and (orientation: landscape)");
+    let sheetPointer = -1, sheetStartY = 0, sheetStartHeight = 0, sheetDirection = 1;
+    const sheetLimits = () => {
+      const safe = getComputedStyle(document.documentElement);
+      const safeTop = parseFloat(safe.getPropertyValue("--safe-top")) || 0;
+      const safeBottom = parseFloat(safe.getPropertyValue("--safe-bottom")) || 0;
+      const viewport = parseFloat(el.sheet.style.getPropertyValue("--chat-viewport")) || window.innerHeight;
+      const max = Math.max(1, bottomSheet.matches ? viewport - 74 - safeTop : window.innerHeight - 90 - safeTop - safeBottom);
+      return { min: Math.min(240, max), max };
+    };
+    const showSheetHeight = () => {
+      const limits = sheetLimits();
+      const height = el.sheet.getBoundingClientRect().height;
+      el.sheetPanels.setAttribute("aria-orientation", bottomSheet.matches ? "horizontal" : "vertical");
+      el.sheetResize.setAttribute("aria-valuemin", String(Math.round(limits.min)));
+      el.sheetResize.setAttribute("aria-valuemax", String(Math.round(limits.max)));
+      if (height > 0) el.sheetResize.setAttribute("aria-valuenow", String(Math.round(height)));
+    };
+    const resizeSheet = (height) => {
+      const limits = sheetLimits();
+      sheetHeight = Math.round(Math.min(limits.max, Math.max(limits.min, height)));
+      el.sheet.style.setProperty("--sheet-height", `${sheetHeight}px`);
+      showSheetHeight();
+    };
+    const finishSheetResize = () => {
+      const pointer = sheetPointer;
+      sheetPointer = -1;
+      if (pointer >= 0 && el.sheetResize.hasPointerCapture(pointer)) el.sheetResize.releasePointerCapture(pointer);
+      if (pointer >= 0) writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
+    };
+    on(el.sheetResize, "pointerdown", (e) => {
+      if (sheetPointer >= 0 || e.button !== 0 || !e.isPrimary) return;
+      e.preventDefault(); e.stopPropagation();
+      sheetPointer = e.pointerId; sheetStartY = e.clientY;
+      sheetStartHeight = el.sheet.getBoundingClientRect().height;
+      sheetDirection = bottomSheet.matches ? -1 : 1;
+      el.sheetResize.focus({ preventScroll: true });
+      if (e.isTrusted) el.sheetResize.setPointerCapture(e.pointerId);
+    });
+    on(el.sheetResize, "pointermove", (e) => {
+      if (e.pointerId !== sheetPointer) return;
+      e.preventDefault(); e.stopPropagation();
+      resizeSheet(sheetStartHeight + (e.clientY - sheetStartY) * sheetDirection);
+    });
+    const endSheetResize = (e) => {
+      if (e.pointerId !== sheetPointer) return;
+      e.preventDefault(); e.stopPropagation();
+      finishSheetResize();
+    };
+    on(el.sheetResize, "pointerup", endSheetResize);
+    on(el.sheetResize, "pointercancel", endSheetResize);
+    on(el.sheetResize, "lostpointercapture", endSheetResize);
+    on(window, "blur", finishSheetResize);
+    on(window, "resize", () => { finishSheetResize(); showSheetHeight(); });
+    on(el.sheetResize, "keydown", (e) => {
+      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
+      e.preventDefault(); e.stopPropagation();
+      const limits = sheetLimits();
+      resizeSheet(e.key === "Home" ? limits.min : e.key === "End" ? limits.max
+        : el.sheet.getBoundingClientRect().height + (e.key === "ArrowUp" ? 32 : -32));
+      writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
+    });
+    on(el.sheetResize, "dblclick", () => {
+      sheetHeight = null;
+      el.sheet.style.removeProperty("--sheet-height");
+      writeSheetState(el.sheet.dataset.open === "true", selectedSheetTab(), sheetHeight);
+      showSheetHeight();
+    });
+    const sheetObserver = new ResizeObserver(showSheetHeight);
+    sheetObserver.observe(el.sheet);
+    listeners.push(() => sheetObserver.disconnect());
+    showSheetHeight();
     let presetHandler = null;
+    for (const b of el.presets) if (!b.closest(".hub-presets")) b.title = "Camera viewpoint · releases character control";
     for (const b of el.presets) on(b, "click", () => {
       b.blur();
       presetHandler && presetHandler(b.dataset.preset);
     });
     const onPreset = (fn) => {
       presetHandler = fn;
-    };
-    let identityHandler = null;
-    const onIdentityChange = (fn) => {
-      identityHandler = fn;
-    };
-    const emitIdentity = () => identityHandler && identityHandler({ handle: el.handle.value, message: el.message.value });
-    on(el.handle, "change", emitIdentity);
-    on(el.message, "change", emitIdentity);
-    const setIdentity = ({ handle, message }) => {
-      el.handle.value = handle || "";
-      el.message.value = message || "";
-    };
-    const setDonationUrl = (url) => {
-      el.qrUrl.textContent = url;
     };
     let assignHandler = null, unassignHandler = null;
     const onAssign = (fn) => {
@@ -1594,6 +2167,7 @@
     };
     // dispose removes only the rows and timers this instance added.
     const dispose = () => {
+      finishSheetResize();
       finishPrimary(true);
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
@@ -1601,7 +2175,11 @@
       window.clearTimeout(hintHideTimer);
       window.clearTimeout(copyTimer);
       for (const off of listeners) off();
+      if (liveRows === rosterRows) liveRows = liveOnline = null;
+      if (liveDonors === refreshDonors) liveDonors = null;
       el.roster.replaceChildren();
+      el.bananaLeaders.replaceChildren();
+      el.bananaRecent.replaceChildren();
       el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -1610,6 +2188,10 @@
       tooltip.hide();
       clearModeHold();
       modePointer = -1;
+      retake.actor = null; retake.gorilla = false;
+      retakePortraitActor = retakeGeometry = retakePortraitGeometry = null;
+      retakeHealth = -1; retakeHealthMax = 0;
+      el.ownOogaFace.width = ICON_PX;
       setGorilla(null);
       setMode(null, false, "detached", false);
       setPrimary(false, false, null);
@@ -1618,14 +2200,150 @@
       setWeapon(false, false, 0);
       setMagazine(0, 0, 0, false);
       setJetpack(false, false, 0);
-      closeFeed();
       closeRecipe();
       closeBoard(true);
+      destinationNames = [];
+      destinationIndex = -1;
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
-  BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
+  // The account line in the sheet's foot is page-level: shown only when a backend answered, and
+  // the director hands every change of `BL.net.state` here, whichever scene is active.
+  const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
+  // Net and voice emits re-run this several times a second with the same outcome; last-written
+  // records keep an unchanged textContent from re-invalidating the line.
+  let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
+  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null;
+  const showAccount = ({ backend, me, room, online }) => {
+    const hasMe = !!me;
+    if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
+    const name = me ? me.display : "";
+    if (name !== accountName) { accountName = name; $("account-name").textContent = name; }
+    if (hasMe !== accountMe) {
+      accountMe = hasMe;
+      $("account-name").hidden = !me;
+      $("account-login").hidden = !!me;
+      $("account-logout").hidden = !me;
+    }
+    // The foot's green dot shows only while the room is live.
+    const live = String(!!me && room === "live");
+    if (live !== accountLive) { accountLive = live; $("account").dataset.live = live; }
+    const words = room === "live" ? `${online} online` : ROOM_WORDS[room] || "";
+    if (words !== accountWords) { accountWords = words; $("account-room").textContent = words; }
+    const wordsHidden = !me || !words;
+    if (wordsHidden !== accountWordsHidden) { accountWordsHidden = wordsHidden; $("account-room").hidden = wordsHidden; }
+    const rejoinHidden = !me || !ROOM_WORDS[room];
+    if (rejoinHidden !== accountRejoinHidden) { accountRejoinHidden = rejoinHidden; $("account-rejoin").hidden = rejoinHidden; }
+    // Voice: join, then mute and unmute beside Leave voice, which hangs up and releases the microphone without
+    // signing out; a failure says why on the button until the next try. Leave waits out a join in progress.
+    const voice = BL.voice.stats, voiceButton = $("account-voice");
+    const voiceHidden = room !== "live";
+    if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
+    const voiceWords = voice.joining ? "Joining voice" : voice.error && !voice.enabled ? `Voice: ${voice.error}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
+    const pressed = String(voice.enabled && !voice.muted);
+    if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
+    const leaveHidden = voiceHidden || !voice.enabled;
+    if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
+  };
+  // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
+  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
+  // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
+  // `keyed` is whether M unmutes in the active scene.
+  const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
+  let micShown = "", micTimer = 0;
+  const showMic = (voice, keyed) => {
+    const muted = voice.muted && (voice.enabled || voice.joining), alone = !muted && voice.enabled && voice.alone;
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Alone \u00b7 mic off" : voice.enabled ? "Mic on" : "";
+    if (shown === micShown) return;
+    const note = $("mic-note"), was = micShown;
+    micShown = shown;
+    window.clearTimeout(micTimer);
+    micTimer = 0;
+    note.textContent = shown;
+    note.dataset.muted = String(muted);
+    if (muted || alone) note.hidden = false;
+    else if (shown && was && !note.hidden) micTimer = window.setTimeout(() => { note.hidden = true; }, MIC_ON_MS);
+    else note.hidden = true;
+  };
+  // The roster's marks are page-level too: whichever scene's roster is up, each signed-in player's row
+  // (their own Ooga, else the one they drive) shows the host dot and their voice. The director hands every
+  // room and voice change here; only marks that changed are touched, and rows never move for them.
+  let liveRows = null, liveOnline = null, liveSignedIn = false;
+  const VOICE_WORDS = { on: "In voice", speaking: "Speaking", muted: "Muted their microphone" };
+  const voiceRowOf = (login, body) => {
+    const character = BL.net.characterOf(login);
+    return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
+  };
+  const paintMarks = (row) => {
+    const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);
+    if (row.look !== row.nextLook || row.login !== row.nextLogin || row.blocked !== blocked || row.self !== row.nextSelf) {
+      row.look = row.nextLook;
+      row.login = row.nextLogin;
+      row.blocked = blocked;
+      row.self = row.nextSelf;
+      const button = row.voice;
+      button.hidden = !row.look;
+      button.dataset.voice = row.look;
+      button.dataset.login = row.login;
+      button.dataset.self = String(row.self);
+      button.disabled = !row.login && !row.self;
+      button.setAttribute("aria-pressed", String(blocked));
+      const words = !row.look ? "" : row.self ? row.look === "muted" ? "Your microphone is muted: click to unmute" : "Your microphone: click to mute"
+        : `${VOICE_WORDS[row.look]}${blocked ? ". Muted for you: click to unmute" : row.login ? ". Click to mute for you" : ""}`;
+      button.title = words;
+      button.setAttribute("aria-label", words);
+    }
+    if (row.hostOn !== row.nextHost) {
+      row.hostOn = row.nextHost;
+      row.host.hidden = !row.hostOn;
+    }
+  };
+  // A signed-in player is online on their own Ooga's row and on the row of the actor's Ooga.
+  const markOnline = (login, body) => {
+    const character = BL.net.characterOf(login), own = character && liveRows.get(character.handle), driven = body && liveRows.get(BL.net.bodyName(body));
+    if (own) own.nextOnline = true;
+    if (driven) driven.nextOnline = true;
+  };
+  const showVoices = () => {
+    if (!liveRows) return;
+    for (const row of liveRows.values()) {
+      row.nextLook = row.nextLogin = "";
+      row.nextHost = row.nextOnline = row.nextSelf = false;
+    }
+    const net = BL.net.state, voice = BL.voice.stats;
+    const signedIn = !!net.me, accountChanged = signedIn !== liveSignedIn;
+    liveSignedIn = signedIn;
+    if (net.room === "live" && net.me) {
+      markOnline(net.me.login, net.body);
+      for (const rec of BL.net.remotes.values()) markOnline(rec.login, rec.body);
+      const self = voiceRowOf(net.me.login, net.body);
+      if (self) {
+        if (voice.enabled) {
+          self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
+          self.nextSelf = true;
+        }
+        if (net.hostId === net.selfId) self.nextHost = true;
+      }
+      for (const rec of BL.net.remotes.values()) {
+        const row = voiceRowOf(rec.login, rec.body);
+        if (!row) continue;
+        if (rec.voice) {
+          row.nextLook = rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on";
+          row.nextLogin = rec.login;
+        }
+        if (rec.id === net.hostId) row.nextHost = true;
+      }
+    }
+    for (const row of liveRows.values()) {
+      paintMarks(row);
+      if (row.netOnline === row.nextOnline && !accountChanged) continue;
+      row.netOnline = row.nextOnline;
+      liveOnline(row);
+    }
+  };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, STATE_LABELS, statusFor };
 })();
