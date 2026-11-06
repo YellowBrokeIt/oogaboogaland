@@ -15,10 +15,10 @@
       return entry.path ? `${entry.title} · ${this.name}` : `${this.name} · ${entry.title}`;
     },
     list: [
-      { path: "", scene: "hub", image: "home", title: "an island of caves where bananas feed EntropyLab contributors",
-        description: "A floating island of caves where donated bananas feed the voxel cavemen of OogaBoogaX. Race, skydive, mine and fly, under weather from the live Bitcoin mempool." },
-      { path: "donate", scene: "hub", place: "donate", title: "Feed the Ooga Boogas",
-        description: "Feed the Ooga Boogas with a donation of bananas on Ooga Booga Land." },
+      { path: "", scene: "hub", image: "home", title: "a virtual world for open-source contributors",
+        description: "Ooga Booga Land is a virtual world where open-source contributors collaborate and track contributions across Team Ooga Booga’s repositories." },
+      { path: "donate", scene: "hub", place: "donate", title: "Feed the Oogas",
+        description: "Feed the Oogas with a donation of bananas on Ooga Booga Land." },
       { path: "oogarally", scene: "race", image: "oogarally", title: "Ooga Rally",
         description: "Kart racing round a floating island. Three tracks, three laps: podium on all of them and take the Cup." },
       { path: "oogadrop", scene: "drop", image: "oogadrop", title: "Ooga Drop",
@@ -37,6 +37,8 @@
         description: "Banana Certified Accounting: two suited gorillas at walnut desks count every banana on abacuses. Count bananas. Keep receipts. Build in public." },
       { path: "lightning", scene: "factory", image: "lightning", title: "Lightning Factory",
         description: "A Lightning node at work as a factory in a tiered cavern, run by gorillas in hard hats: forwards ride the conduits through the glowing core." },
+      { path: "jet", scene: "hangar", title: "Lightning Jet Hangar",
+        description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
         description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",

@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_LIMITS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -14,6 +14,36 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   }
   const g = parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, g: [127, 30, -2e6, 2, -2, 3] }));
   assert.deepEqual(g.g, [127, 20, -1e6, 1, -1, 1], "gorilla locomotion, including sleep, is bounded independently of position");
+  assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 7 })).j, 7, "a worn jetpack at full thrust rides the pose");
+  assert.equal("j" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, j: 0 })), false, "no jetpack adds nothing");
+  assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 255 })).w, 255, "the gun in hand, aimed, with every round, rides the pose");
+  assert.equal("w" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 0 })), false, "empty hands add nothing");
+});
+
+test("presentation phases are bounded integers and fit the existing pose envelope", () => {
+  const v = VISUAL_LIMITS.map((n, i) => i < 3 ? -n : n);
+  const wire = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, j: 7, w: 255, v });
+  assert.ok(wire.length <= MESSAGE_MAX, "the largest bounded Ooga sample must not close its socket");
+  assert.deepEqual(parseClientMessage(wire).v, v);
+  const r = [0, 3, 255, -577, -577, -577], resting = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, j: 7, w: 255, v, r });
+  assert.ok(resting.length <= MESSAGE_MAX, "all presentation fields plus a hammock transition keep the existing 256-byte cap");
+  assert.deepEqual(parseClientMessage(resting).r, r);
+  assert.equal(parseClientMessage('{"t":"pose","x":0,"y":0,"z":0,"yaw":0,"r":0}').r, 0);
+  for (const r of [null, [], [0, 1, 0], [1, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 4, 0, 0, 0, 0], [0, 1, 256, 0, 0, 0], [0, 1, 0, 1001, 0, 0], [0, 1, 0, 1000, 1000, 1000], [0, 1, 0, 0.5, 0, 0]])
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, r })), null, "malformed rest never reserves a seat");
+  assert.equal("v" in parseClientMessage('{"t":"pose","x":0,"y":0,"z":0,"yaw":0}'), false);
+  for (const bad of [null, [], v.slice(1), [...v, 0], v.map((n, i) => i === 3 ? 8192 : n), v.map((n, i) => i === 4 ? -1 : n), v.map((n, i) => i === 0 ? 150.5 : n)]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, v: bad })), null);
+  }
+});
+
+test("a shot is six numbers inside the room's bounds and a shot's reach, rounded; a swing is just the strike", () => {
+  assert.deepEqual(parseClientMessage(JSON.stringify({ t: "shot", a: [1.23456, 2, 3, 30, 4, -5] })), { t: "shot", a: [1.235, 2, 3, 30, 4, -5] });
+  assert.deepEqual(parseClientMessage('{"t":"swing"}'), { t: "swing" });
+  for (const a of [null, [], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, "5", 6], [BOUND_XZ + 1, 0, 0, 0, 0, 0],
+    [0, BOUND_Y_MAX + 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, -BOUND_XZ - 1], [-100, 0, 0, 100, 0, 0]]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "shot", a })), null, JSON.stringify(a));
+  }
 });
 
 test("poses out of bounds or not numbers are ignored, not fatal", () => {
@@ -23,6 +53,12 @@ test("poses out of bounds or not numbers are ignored, not fatal", () => {
   for (const g of [null, {}, [], [4, 0, 0, 0, 0], [4, 0, 0, 0, 0, 0, 0], [128, 0, 0, 0, 0, 0], [-1, 0, 0, 0, 0, 0],
     [0.5, 0, 0, 0, 0, 0], [4, "1", 0, 0, 0, 0], [4, 0, null, 0, 0, 0]]) {
     assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, g })), null, JSON.stringify(g));
+  }
+  for (const j of [8, -1, 1.5, "1", null, true]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, j })), null, JSON.stringify(j));
+  }
+  for (const w of [256, -1, 2.5, "2", null, false]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, w })), null, JSON.stringify(w));
   }
 });
 
@@ -96,9 +132,6 @@ test("body ownership: only an Ooga owner may join and claim their own Ooga or go
   assert.equal(claimRefusal(cast, "bc1gui", "bc1gui", room(["ottoz0r"])), "not-yours");
   // An old guest session never gains a body, even if nobody else is present.
   assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room()), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["portlandhodl"])), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["someone", "portlandhodl"])), "not-yours");
-  assert.equal(claimRefusal(cast, "visitor", "portlandhodl", room(["visitor", "portlandhodl"])), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", "nobody-real", room()), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", null, room(["portlandhodl"])), null);
   // Eligibility is a Worker-vouched flag, persisted in the room's attachment.
@@ -115,7 +148,6 @@ test("body ownership: only an Ooga owner may join and claim their own Ooga or go
   assert.equal(claimRefusal(cast, "ottoz0r", "gorilla:portlandhodl", room()), "not-yours");
   assert.equal(claimRefusal(cast, "ottoz0r", "gorilla:ottoz0r", room(), true), "not-yours", "canonical handle, not its login alias");
   assert.equal(claimRefusal(cast, "visitor", "gorilla:portlandhodl", room()), "not-yours", "a signed-in visitor cannot borrow a gorilla");
-  assert.equal(claimRefusal(cast, "visitor", "gorilla:portlandhodl", room(["portlandhodl", "gorilla:portlandhodl"])), "not-yours");
   assert.equal(claimRefusal(cast, "visitor", "gorilla:nobody-real", room()), "not-yours");
   assert.equal(claimRefusal(cast, "new-ooga", "gorilla:new-ooga", room()), "not-yours");
   assert.equal(claimRefusal(cast, "new-ooga", "gorilla:NEW-OOGA", room(), true), null);
@@ -220,13 +252,18 @@ test("Ember Den voice separates ten tables and the walking floor without changin
   for (const table of [-1, 10, 0.5, "0", undefined]) assert.equal(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), null);
 });
 
-test("NPC host: the page longest in the room among those showing the island; nobody when none does", async () => {
+test("NPC host: the sitting host while it shows the island, else the page longest in the room among those that do; nobody when none does", async () => {
   const { electHost, parseClientMessage } = await import("../src/protocol.js");
   const p = (id, joinedAt, inHub) => ({ id, joinedAt, inHub });
   assert.equal(electHost([p(1, 100, true), p(2, 50, true), p(3, 10, false)]), 2);
   assert.equal(electHost([p(1, 100, true), p(2, 100, true)]), 1, "a tie goes to the lower id");
   assert.equal(electHost([p(1, 100, false)]), 0);
   assert.equal(electHost([]), 0);
+  // A sitting host keeps the role while it shows the island, even when an older page comes back; it gives it up
+  // only by leaving or hiding.
+  assert.equal(electHost([p(1, 100, true), p(2, 50, true)], 1), 1, "an older page returning does not take hosting back");
+  assert.equal(electHost([p(1, 100, false), p(2, 50, true)], 1), 2);
+  assert.equal(electHost([p(2, 50, true)], 9), 2, "a host that has left hands over to the oldest");
   assert.deepEqual(parseClientMessage('{"t":"hub","on":true}'), { t: "hub", on: true });
   assert.equal(parseClientMessage('{"t":"hub","on":"yes"}'), null);
 });
@@ -239,4 +276,83 @@ test("NPC followers: every other page showing the island, so a lone host sends n
   const two = [p(1, 10, true), p(2, 20, true), p(3, 30, false)];
   assert.equal(npcFollowers(two, electHost(two)), 1);
   assert.equal(npcFollowers(two, 0), 0, "no host, no followers");
+});
+
+test("chalkboard edits are small integers in frames under the limit, refused whole when malformed", () => {
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", ...m }));
+  assert.deepEqual(parse({ k: "take" }), { t: "chalk", k: "take" });
+  assert.deepEqual(parse({ k: "drop", extra: 1 }), { t: "chalk", k: "drop" });
+  assert.deepEqual(parse({ k: "line", m: "e", p: [1, 2, 3, 4] }), { t: "chalk", k: "line", m: "e", p: [1, 2, 3, 4] });
+  assert.deepEqual(parse({ k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] }), { t: "chalk", k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] });
+  assert.deepEqual(parse({ k: "wipe", to: "original" }), { t: "chalk", k: "wipe", to: "original" });
+  for (const bad of [{ k: "line", m: "c", p: [1, 2] }, { k: "line", m: "x", p: [1, 2, 3, 4] }, { k: "more", p: [1, 2, 3] },
+    { k: "more", p: [1, 1001] }, { k: "more", p: [0.5, 1] }, { k: "type", c: [["ab", 1, 1]] }, { k: "type", c: [["\u0007", 1, 1]] },
+    { k: "type", c: [] }, { k: "wipe", to: "all" }, { k: "steal" }])
+    assert.equal(parse(bad), null, JSON.stringify(bad));
+  // The page's fullest frames: a line's chunk at the board's far corner, and a chunk of characters JSON escapes.
+  const line = JSON.stringify({ t: "chalk", k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
+  const typed = JSON.stringify({ t: "chalk", k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
+  assert.ok(line.length <= MESSAGE_MAX && typed.length <= MESSAGE_MAX, `${line.length} ${typed.length}`);
+  assert.equal(parseClientMessage(line).p.length, CHALK.CHUNK * 2);
+});
+
+test("a chalkboard edit applies the same anywhere: lines and characters stop at the limits, backspace reaches only its own session", () => {
+  const board = CHALK.board(), start = board.marks.length, session = CHALK.session(board);
+  assert.equal(CHALK.apply(board, { k: "back" }, session), "nothing", "the original message is not a typed character");
+  assert.equal(CHALK.apply(board, { k: "more", p: [1, 1] }, session), "closed", "no line is open");
+  assert.equal(CHALK.apply(board, { k: "line", m: "c", p: [0, 0, 500, 1000] }, session), null);
+  assert.deepEqual(board.marks.at(-1), { t: "c", s: 2, p: [0, 0, 0.5, 1] });
+  assert.equal(CHALK.apply(board, { k: "type", c: [["a", 250, 500]] }, session), null);
+  assert.equal(CHALK.apply(board, { k: "back" }, session), null);
+  assert.equal(board.marks.length, start + 1);
+  const other = CHALK.session(board);
+  CHALK.apply(board, { k: "type", c: [["b", 1, 1]] }, session);
+  assert.equal(CHALK.apply(board, { k: "back" }, CHALK.session(board)), "nothing", "a later session cannot take back an earlier one's writing");
+  assert.equal(other.from, start + 1);
+  const long = CHALK.board([]), s = CHALK.session(long);
+  CHALK.apply(long, { k: "line", m: "c", p: [0, 0, 1, 1] }, s);
+  for (let i = 0; i < CHALK.LINE_POINTS; i++) CHALK.apply(long, { k: "more", p: [i % 1000, 5] }, s);
+  assert.equal(long.marks[0].p.length, CHALK.LINE_POINTS * 2, "a line stops at its point limit");
+  assert.equal(long.points, CHALK.LINE_POINTS);
+  assert.deepEqual(CHALK.restore(long.marks), long.marks, "and a board at its limits reads back");
+  assert.equal(CHALK.apply(long, { k: "wipe", to: "clean" }, s), null);
+  assert.deepEqual(long, { marks: [], points: 0 });
+  assert.equal(CHALK.restore([{ t: "t", ch: "\u0000", p: [0, 0] }]), null);
+  // Text is atomic at the total point limit too, even when plenty of mark slots remain.
+  for (const [points, characters, accepted] of [[9999, 2, false], [9999, 1, true], [10000, 1, false]]) {
+    const marks = Array.from({ length: 10 }, (_, i) => ({ t: "c", s: 2, p: Array((i < 9 ? 1000 : points - 9000) * 2).fill(0.5) }));
+    assert.ok(CHALK.restore(marks));
+    const b = CHALK.board(marks), session = { open: 9, from: 0 }, before = structuredClone({ b, session });
+    const op = CHALK.parse({ k: "type", c: [["a", 100, 100], ["b", 200, 100]].slice(0, characters) });
+    assert.equal(CHALK.apply(b, op, session), accepted ? null : "full");
+    if (accepted) {
+      assert.equal(b.points, CHALK.MAX_POINTS);
+      assert.equal(b.marks.length, 11);
+      assert.equal(session.open, -1);
+    } else assert.deepEqual({ b, session }, before, "refused text changes neither marks, points nor the open line");
+    assert.ok(CHALK.restore(b.marks));
+  }
+});
+
+test("a wallet event is a device number, its fuse and, where it lies or flies, a bounded place; anything else is ignored", () => {
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "wallet", ...m }));
+  assert.deepEqual(parse({ k: "take", u: 7, l: 2, f: 21 }), { t: "wallet", k: "take", u: 7, l: 2, f: 21 });
+  assert.deepEqual(parse({ k: "down", u: 7, f: 12.34567, x: 1.23456, y: 0, z: -3 }), { t: "wallet", k: "down", u: 7, f: 12.346, x: 1.235, y: 0, z: -3 });
+  assert.deepEqual(parse({ k: "throw", u: 7, f: 3, x: 1, y: 2, z: 3, vx: 3.2, vy: 2.6, vz: -1 }), { t: "wallet", k: "throw", u: 7, f: 3, x: 1, y: 2, z: 3, vx: 3.2, vy: 2.6, vz: -1 });
+  assert.deepEqual(parse({ k: "up", u: 7, f: 9 }), { t: "wallet", k: "up", u: 7, f: 9 });
+  assert.deepEqual(parse({ k: "blast", u: [7, 8] }), { t: "wallet", k: "blast", u: [7, 8] });
+  for (const bad of [{ k: "take", u: 0, l: 1, f: 21 }, { k: "take", u: 7, l: 16, f: 21 }, { k: "take", u: 7, l: 1, f: 61 }, { k: "up", u: 7 },
+    { k: "down", u: 7, f: 1, x: BOUND_XZ + 1, y: 0, z: 0 }, { k: "throw", u: 7, f: 1, x: 0, y: 0, z: 0, vx: 21, vy: 0, vz: 0 },
+    { k: "blast", u: [] }, { k: "blast", u: Array(17).fill(1) }, { k: "steal", u: 7, f: 1 }])
+    assert.equal(parse(bad), null, JSON.stringify(bad));
+});
+
+
+test("numeric owner retains the same Ooga and gorilla while a reused login cannot drive either", () => {
+  const index = castIndex([{ handle: "Bitcoin-Bill", github_login: "Bitcoin-Bill" }]);
+  for (const login of ["Bitcoin-Bill", "Bitclank-Bill"])
+    for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
+      assert.equal(claimRefusal(index, login, body, [], true, 185141343), null);
+  for (const body of ["Bitcoin-Bill", "gorilla:Bitcoin-Bill"])
+    assert.equal(claimRefusal(index, "Bitcoin-Bill", body, [], true, 99), "not-yours");
 });

@@ -94,6 +94,8 @@
   };
   // Module scope, so the board keeps the last pick for the page's life across visits.
   const selection = { racer: contributors.activeRoster[0]?.name || null };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the board's picker is for the rest.
+  const ownDiver = () => BL.net.ownAmong(contributors.activeRoster);
 
   // One visit's state: made in enter, dropped in leave.
   // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
@@ -102,7 +104,8 @@
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   // The pull altitude and the sink at touchdown, for the bonuses they earn.
   let pullAlt = 0, landSink = 0, life = null;
-  let stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0;
+  let scoreTicket = null, unwatchScores = null;
   const placed = [];
   const clouds = [];
   const rings = [];
@@ -121,12 +124,6 @@
   const planeState = { t: 0, speed: 0, yaw: 0, pitch: 0, roll: 0, angle: 0, alt: 0, vx: 0, vy: 0, vz: 0 };
   let jumpAngle = 0;
   const jumpT = ROLL_T + CLIMB_T;
-  const dropScene = {
-    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
-    }
-  };
 
   // Position along the climb at time t, written into out.
   const pathAt = (t, out) => {
@@ -289,6 +286,8 @@
 
   const toBoard = () => {
     phase = "board";
+    hud.setPanelsHidden(false);
+    dhud.lockDiver(ownDiver());
     parkPlane();
     if (diver) {
       diver.place(roof.x, roof.y, roof.z, roof.ry);
@@ -321,6 +320,8 @@
     layCourse(game.recordJump());
     toBoard();
     phase = "climb";
+    hud.setPanelsHidden(true);
+    scoreTicket = BL.highscores?.begin("drop") || null;
     dhud.show("flight");
     dhud.setRings(0, RING_COUNT);
     dhud.setChute("pack");
@@ -328,7 +329,6 @@
     hud.el.act.hidden = !COARSE;
     hud.setAct("Jump!");
     hud.setSubtitle("Ooga Drop · climbing");
-    window.clearTimeout(hintTimer);
     hud.hint("", 0);
     dhud.notice(COARSE ? "hold Jump! to hurry the climb" : "hold Space to hurry the climb", 2600);
     fx.say(diver.cave, "Ooga fly!", 1.6);
@@ -378,6 +378,7 @@
   const finish = (landing, dist) => {
     if (!diver) return;
     phase = "results";
+    hud.setPanelsHidden(false);
     const p = diver.state.p, pileDist = Math.hypot(p.x, p.z), near = Math.min(dist, pileDist);
     const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - near / SCORE.landRadius, 0, 1));
     const stood = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
@@ -387,6 +388,8 @@
     score += accuracy + stood + soft + low + banana;
     const medal = dhud.medalFor(score);
     const improved = game.recordDrop({ score, rings: ringsHit, ringTotal: RING_COUNT, landing });
+    if (score > 0 && (landing === "stand" || landing === "stumble")) BL.highscores?.submit(scoreTicket, "drop-1", score);
+    scoreTicket = null;
     result = { landing, dist, accuracy, soft: stood + soft, low, banana, score, medal, improved };
     const rows = [["Rings", `${ringsHit} of ${RING_COUNT} · ${score - accuracy - stood - soft - low - banana}`], ["Landing", landing === "lost" ? landingLabel.lost : `${landingLabel[landing]} · ${near.toFixed(1)} from the ${pileDist < dist ? "pile" : "target"} · ${accuracy}`]];
     if (landing !== "lost") rows.push(["Touchdown", `${stood}${soft ? ` · soft ${soft}` : ""}`]);
@@ -798,14 +801,14 @@
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
   };
+  const controlCopy = touch => touch ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (phase === "board") go(home);
       else toBoard();
     }
-    if (e.key === "Enter" && (phase === "board" || phase === "results")) startFlight();
-    if (e.key === "0") cam.offset = cam.tilt = 0;
-    if (e.key === "m" || e.key === "M") toggleMute();
+    if (BL.controls.matches(e, "start") && (phase === "board" || phase === "results")) startFlight();
+    if (BL.controls.matches(e, "resetView")) cam.offset = cam.tilt = 0;
     if (e.key === "b" || e.key === "B") {
       world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
@@ -833,11 +836,12 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("drop", home);
     camera = createCamera({ fov: 50, near: 0.4, far: 820 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -908,6 +912,8 @@
       if (contributors.activeRoster.some((c) => c.name === world.pilot)) selection.racer = world.pilot;
       world.pilot = null;
     }
+    const own = ownDiver();
+    if (own) selection.racer = own;
     buildDiver();
     if (diver) layCourse(game.state.drop.jumps);
     else {
@@ -920,17 +926,19 @@
     agent.pace(agentX, agentZ, 1.5);
     place(agent.root);
     setVec(targetNode.position, landingSpot.x, landingSpot.y + 0.02, landingSpot.z);
-    dhud = dropHud.create({ roster: contributors.activeRoster, best: () => game.state.drop.best, onPick: pickDiver });
+    dhud = dropHud.create({ roster: contributors.activeRoster, best: () => game.state.drop.best, onPick: pickDiver,
+      sharedBest: () => BL.highscores?.best("drop", "drop-1") ?? null });
     dhud.selection.racer = selection.racer;
     dhud.buildBoard((name) => contributors.stateFor(contributors.activeRoster.find((c) => c.name === name)));
+    unwatchScores = BL.highscores?.watch("drop", () => dhud.refreshBest()) || null;
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     dropScene.agentControls = controls;
     audio = BL.dropAudio.create();
     // Cleared per visit: a flare held at leave would suppress the next cue.
     flaringWas = quieted = false;
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -976,14 +984,12 @@
     for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.el.sheet.dataset.open = "false";
-    dhud.el.help.textContent = COARSE ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
+    dhud.el.help.textContent = controlCopy(COARSE);
     toBoard();
     stateTimer = window.setInterval(() => {
       for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick an Ooga, then Fly!" : "Pick an Ooga, then Fly! (Enter)"), 1200);
     Object.assign(dropScene, {
       root, camera, input,
       debug: {
@@ -1068,8 +1074,8 @@
     });
   };
   const leave = () => {
+    unwatchScores?.(); unwatchScores = null; scoreTicket = null;
     window.clearInterval(stateTimer);
-    window.clearTimeout(hintTimer);
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     audio.dispose();
@@ -1104,8 +1110,29 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, rings: ringsHit, streaks: streaks.node.instanceCount };
   };
-  Object.assign(dropScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const dropScene = BL.deferred.scene("drop", {
+    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    // The bare island is the cold visit's largest build, sliced behind the black hold; enter then adopts the completed,
+    // scene-owned cache entry.
+    buildSteps: () => terrain.islandSteps({ seed: SEED }),
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
+    }
+  });
   BL.scenes = BL.scenes || {};
   dropScene.prepare = () => { const loading = BL.deferred.load("drop"); return loading ? loading.then(() => null) : null; };
+  dropScene.controlsHelp = touch => {
+    const H = BL.controlsHelp, rows = touch ? H.fromCopy(controlCopy(true), true) : [
+      H.movement("Forward/back pitches · left/right rolls"),
+      H.row(BL.controls.keysFor("yawLeft", "yawRight"), "Turn"),
+      H.row([" "], phase === "board" || phase === "results" ? "Start flight" : phase === "climb" ? "Jump at the mark" : "Pull chute / hold to flare"),
+      H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row([], "Look around", "Drag")];
+    if (!touch && !COARSE) rows.push(H.row(BL.controls.keysFor("pitchDown", "pitchUp"), "Pitch"));
+    if (phase === "board" || phase === "results") rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), "Start flight", touch ? "Fly! button" : ""));
+    if (touch) rows.push(H.row([], "Return to the board", "Board button"));
+    rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave Ooga Drop" : phase === "board" ? "Leave" : "Return to the board", touch ? "Back button" : ""));
+    return { title: "Ooga Drop", rows };
+  };
   BL.scenes.drop = dropScene;
 })();

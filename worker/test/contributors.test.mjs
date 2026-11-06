@@ -7,14 +7,212 @@ import { contributorRows, createContributorLookup, createOwnedCharacterLookup } 
 import { missingCharacters, characterSource, retiredCharacters, queuedDefaults } from "../../scripts/sync-characters.mjs";
 import { checkCharacterIdentities, identityAdvice } from "../../scripts/contributor-pr.mjs";
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
-import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner } from "../../scripts/character-safety.mjs";
-import { digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
-import { createCoordinator } from "../../scripts/character-bundles.mjs";
+import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
+import { LANES, digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
+import { createCoordinator, runAccountRenameChecks } from "../../scripts/character-bundles.mjs";
 import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mjs";
+import { inspectAccountRename, onlyAccountLoginChanged } from "../../scripts/character-account-rename.mjs";
+import { createGitHub } from "../../scripts/character-github.mjs";
+import { snapshotRename, refreshRenameSnapshot } from "../../scripts/account-rename-snapshot.mjs";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const person = (login, extra = {}) => ({ login, counts: { commits: 1 }, first_seen_at: "2026-09-01T00:00:00Z", last_seen_at: "2026-10-04T11:00:00Z", ...extra });
 const snapshot = (...rows) => ({ meta: { org: "OogaBoogaX", schema_version: 3, generated_at: new Date(NOW).toISOString() }, contributors: rows });
+
+const accountRenameFixture = () => {
+  const rock = "a".repeat(40), head = "b".repeat(40), path = "src/characters/Bitcoin-Bill.js", repo = "example/land";
+  // Historical fixture: the deployed character can already have its new login.
+  const base = `BL.characters.add({
+    handle: "Bitcoin-Bill",
+    github: "Bitcoin-Bill",
+    display: "Bitclank Bill",
+    joined: 1,
+    lastCommit: 2
+  });\n`;
+  const f = { rock, head, path, repo, base, source: base.replace('github: "Bitcoin-Bill"', 'github: "Bitclank-Bill"'),
+    permission: "admin", commits: [{ sha: head }], reviews: [], calls: [], signed: true,
+    account: { id: 185141343, login: "Bitclank-Bill", type: "User" }, revisionFiles: [{ filename: path, status: "modified" }] };
+  f.pr = { number: 7, state: "open", draft: false, user: { ...OPERATORS[0], type: "User" }, base: { ref: "rock", repo: { full_name: repo } }, head: { sha: head, repo: { full_name: repo } } };
+  f.gh = { repo,
+    api: async (url, method, data) => {
+      f.calls.push({ url, method, data });
+      if (url === "pulls/7") return f.pr;
+      if (url === "git/ref/heads/rock") return { object: { sha: rock } };
+      if (url.startsWith("statuses/")) return {};
+      if (url.startsWith("collaborators/")) return { permission: f.permission };
+      if (url.startsWith("compare/")) return { merge_base_commit: { sha: rock }, total_commits: f.commits.length, files: f.diffFiles || [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: f.revisionAuthor || f.pr.user, parents: [{ sha: rock }], files: f.revisionFiles, commit: { verification: { verified: f.signed } } };
+      throw new Error(`Unexpected request ${url}`);
+    },
+    list: async (url) => {
+      if (url === "pulls/7/commits") return f.commits;
+      if (url === "pulls/7/reviews") return f.reviews;
+      if (url === "pulls?state=open&base=rock") return [f.pr];
+      throw new Error(`Unexpected list ${url}`);
+    },
+    tree: async () => new Map([[path, {}]]),
+    file: async (ref) => ({ sha: ref === rock ? "c".repeat(40) : "d".repeat(40), source: ref === rock ? f.base : ref === head ? f.source : f.earlierSource }),
+    account: async (lookup) => f.lookup ? f.lookup(lookup) : f.account
+  };
+  return f;
+};
+
+test("rename unit preparation refreshes only a pinned github-only change and fails closed on missing or stale activity", async () => {
+  const f = accountRenameFixture();
+  const detect = (files = [f.path], before = f.base, after = f.source) => snapshotRename(files, () => before, () => after);
+  assert.equal(detect(), "Bitclank-Bill");
+  assert.equal(detect([f.path, "README.md"]), null);
+  assert.equal(detect([f.path], null), null);
+  assert.equal(detect([f.path], f.base, null), null);
+  assert.equal(detect([f.path], f.base, f.base), null);
+  assert.equal(detect([f.path], f.base, f.source + "\n// unrelated"), null);
+  assert.equal(detect(["src/characters/Alice.js"], f.base.replaceAll("Bitcoin-Bill", "Alice"), f.source.replaceAll("Bitcoin-Bill", "Alice")), null);
+  let calls = 0, baked;
+  const bake = async (stats) => { baked = stats; };
+  const fetcher = (stats) => async () => { calls++; return new Response(JSON.stringify(stats)); };
+  assert.equal(await refreshRenameSnapshot(null, bake, () => { throw new Error("unexpected fetch"); }, NOW), false);
+  const current = snapshot(person("Bitclank-Bill"));
+  assert.equal(await refreshRenameSnapshot(detect(), bake, fetcher(current), NOW), true);
+  assert.deepEqual(baked, current);
+  baked = null;
+  await assert.rejects(refreshRenameSnapshot(detect(), bake, fetcher(snapshot(person("Bitcoin-Bill"))), NOW), /does not contain/);
+  await assert.rejects(refreshRenameSnapshot(detect(), bake, fetcher(current), NOW + 86400001), /stale/);
+  await assert.rejects(refreshRenameSnapshot(detect(), bake, async () => new Response("denied", { status: 403 }), NOW), /403/);
+  await assert.rejects(refreshRenameSnapshot(detect(), bake, async () => { throw new Error("offline"); }, NOW), /offline/);
+  assert.equal(baked, null);
+  await assert.rejects(refreshRenameSnapshot(detect(), async () => { throw new Error("bake failed"); }, fetcher(current), NOW), /bake failed/);
+  assert.equal(calls, 4);
+});
+
+test("same-ID account rename accepts only a verified github-only signed operator PR", async () => {
+  const f = accountRenameFixture(), inspect = () => inspectAccountRename(f.gh, f.pr, f.rock);
+  assert.equal(onlyAccountLoginChanged(f.base, f.source), true);
+  assert.equal((await inspect()).githubId, 185141343);
+  assert.equal((await inspect()).newLogin, "Bitclank-Bill");
+  f.account.login = "Bitcoin-Bill";
+  await assert.rejects(inspect, /not verified/);
+  f.account.login = "Bitclank-Bill";
+  f.lookup = async (key) => ({ ...f.account, id: typeof key === "number" ? 185141343 : 123 });
+  await assert.rejects(inspect, /not verified/);
+  f.lookup = async () => { throw new Error("GitHub unavailable"); };
+  await assert.rejects(inspect, /unavailable/);
+  f.lookup = null; f.account.type = "Bot";
+  await assert.rejects(inspect, /not verified/);
+  f.account.type = "User"; f.pr.user.id = 123;
+  await assert.rejects(inspect, /operator-authored/);
+  f.pr.user = { ...OPERATORS[0], type: "User" }; f.permission = "write";
+  await assert.rejects(inspect, /Maintain\/Admin/);
+  f.permission = "admin"; f.signed = false;
+  await assert.rejects(inspect, /signed operator/);
+  f.signed = true; f.pr.head.repo.full_name = "someone/fork";
+  await assert.rejects(inspect, /in this repository/);
+});
+
+test("same-ID account rename rejects mixed diffs, reverted code changes and stale PR heads", async () => {
+  const f = accountRenameFixture(), inspect = () => inspectAccountRename(f.gh, f.pr, f.rock);
+  const valid = f.source;
+  f.source += "\n// unrelated edit\n";
+  await assert.rejects(inspect, /only.*github line/);
+  f.source = valid; f.diffFiles = [...f.revisionFiles, { filename: "README.md", status: "modified" }];
+  await assert.rejects(inspect, /only.*github line/);
+  f.diffFiles = null; f.revisionFiles.push({ filename: "worker/src/auth.js", status: "modified" });
+  await assert.rejects(inspect, /signed operator/);
+  f.revisionFiles.pop(); f.commits.unshift({ sha: "e".repeat(40) }); f.earlierSource = valid + "\n// reverted edit\n";
+  await assert.rejects(inspect, /history contains another change/);
+  f.commits.shift();
+  f.lookup = async () => { f.pr = { ...f.pr, head: { ...f.pr.head, sha: "f".repeat(40) } }; return f.account; };
+  await assert.rejects(inspect, /changed during verification/);
+  assert.throws(() => checkOwner({ handle: "Bitcoin-Bill", github: "Bitclank-Bill" },
+    { handle: "Bitcoin-Bill", github: "Bitcoin-Bill" }, OPERATORS[0].login, true), /separate maintainer-reviewed PR/);
+});
+
+test("verified account-rename checks pass without a second operator's approval and perform no bundle or merge writes", async () => {
+  const f = accountRenameFixture(), coordinator = createCoordinator(f.gh, "private-app[bot]");
+  const gate = () => f.calls.filter((call) => call.data?.context === "Character bundle safety").at(-1)?.data.state;
+  assert.equal(await runAccountRenameChecks(coordinator, { action: "synchronize", pull_request: { number: 7 } }), true);
+  assert.equal(gate(), "success");
+  await runAccountRenameChecks(coordinator, { workflow_run: { event: "pull_request_review" } }); assert.equal(gate(), "success");
+  await runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }); assert.equal(gate(), "success");
+  f.account.id = 123;
+  await assert.rejects(() => coordinator.accountRename(7), /not verified/);
+  assert.equal(gate(), "failure");
+  f.account.id = 185141343; f.pr.user = { ...f.pr.user, login: "former-operator" };
+  await assert.rejects(() => coordinator.refreshAccountRenames(), /operator-authored/);
+  assert.equal(gate(), "failure");
+  f.pr.user = { ...OPERATORS[0], type: "User" };
+  assert.ok(f.calls.filter((call) => call.method && call.method !== "GET").every((call) => call.url.startsWith("statuses/")));
+  const before = f.calls.filter((call) => call.method === "POST").length;
+  f.account.id = 185141343; f.source = f.base.replace('display: "Bitclank Bill"', 'display: "Different display"');
+  assert.equal(await coordinator.accountRename(7), false);
+  assert.equal(f.calls.filter((call) => call.method === "POST").length, before);
+});
+
+test("rename refresh failures leave unidentified PR statuses untouched but identified renames fail closed", async () => {
+  for (const scenario of ["timeout", "5xx", "truncated", "file", "declaration"]) {
+    const f = accountRenameFixture(), api = f.gh.api, file = f.gh.file;
+    // An ordinary code PR or bot bundle must keep its required statuses, even
+    // when discovery fails before the refresh can tell which kind of PR it is.
+    f.diffFiles = [{ filename: "README.md", status: "modified" }];
+    if (scenario === "5xx") f.pr.user = { login: "private-app[bot]", type: "Bot" };
+    f.gh.api = async (url, ...rest) => {
+      if (url.startsWith("compare/")) {
+        if (scenario === "timeout" || scenario === "5xx") throw new Error(`GitHub ${scenario}`);
+        if (scenario === "truncated") return { merge_base_commit: { sha: f.rock }, files: Array(300).fill(f.diffFiles[0]) };
+      }
+      return api(url, ...rest);
+    };
+    if (scenario === "file" || scenario === "declaration") {
+      f.diffFiles = null; f.source = f.base;
+      f.gh.file = async (...args) => {
+        if (scenario === "file") throw new Error("GitHub blob unavailable");
+        return { ...await file(...args), source: "/* incomplete declaration" };
+      };
+    }
+    const coordinator = createCoordinator(f.gh, "private-app[bot]");
+    await assert.rejects(() => runAccountRenameChecks(coordinator, { schedule: "17,37,57 * * * *" }));
+    assert.equal(f.calls.filter((call) => call.method === "POST").length, 0, scenario);
+    f.gh.api = api; f.gh.file = file;
+    if (scenario === "file" || scenario === "declaration") f.source = f.base;
+    await coordinator.refreshAccountRenames();
+    assert.equal(f.calls.filter((call) => call.method === "POST").length, 0, `${scenario} recovery`);
+  }
+  const f = accountRenameFixture(), coordinator = createCoordinator(f.gh, "private-app[bot]");
+  f.lookup = async () => { throw new Error("GitHub unavailable after owner change identified"); };
+  await assert.rejects(() => coordinator.refreshAccountRenames(), /unavailable/);
+  assert.deepEqual(f.calls.filter((call) => call.method === "POST").map((call) => [call.data.context, call.data.state]),
+    [["Character intake", "failure"], ["Character bundle safety", "failure"]]);
+  f.lookup = null;
+  await coordinator.refreshAccountRenames();
+  assert.deepEqual(f.calls.filter((call) => call.method === "POST").slice(-2).map((call) => call.data.state), ["success", "success"]);
+});
+
+test("account lookup uses GitHub's ID and login endpoints without following supplied URLs", async () => {
+  const calls = [], gh = createGitHub("example/land", "test-token", async (url, init) => {
+    calls.push({ url, method: init.method }); return { ok: true, status: 200, json: async () => ({ id: 185141343 }) };
+  });
+  await gh.account(185141343); await gh.account("Bitclank-Bill");
+  assert.deepEqual(calls, [{ url: "https://api.github.com/user/185141343", method: "GET" }, { url: "https://api.github.com/users/Bitclank-Bill", method: "GET" }]);
+});
+
+test("verified account rename refuses competing queued work and another character's login", async () => {
+  const f = accountRenameFixture(), bot = "private-app[bot]", queueHead = "d".repeat(40);
+  const bundle = { number: 9, state: "open", user: { login: bot }, base: { ref: "rock", repo: { full_name: f.repo } },
+    head: { sha: queueHead, ref: "automation/characters-manual-test", repo: { full_name: f.repo } } };
+  const api = f.gh.api, list = f.gh.list, file = f.gh.file;
+  f.gh.api = async (url, ...rest) => url === "pulls/9" ? bundle
+    : url === `commits/${queueHead}` ? { author: { login: bot }, commit: { verification: { verified: true } } } : api(url, ...rest);
+  f.gh.list = async (url) => url === "pulls?state=open&base=rock" ? [f.pr, bundle] : list(url);
+  f.gh.file = async (ref, path) => ref === queueHead ? { sha: queueHead, source: path === manifestPath("manual")
+    ? JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-04", entries: [{ path: f.path, pr: 5, head: "e".repeat(40),
+      base: "c".repeat(40), hash: digest(f.base), author: "owner", lane: "manual" }] }) : f.base } : file(ref, path);
+  const coordinator = createCoordinator(f.gh, bot);
+  await assert.rejects(() => coordinator.accountRename(7), /competing queued/);
+  f.gh.list = list; f.gh.file = async (ref, path) => path === "src/characters/other.js"
+    ? { source: 'BL.characters.add({handle:"other",github:"Bitclank-Bill"});' } : file(ref, path);
+  f.gh.tree = async () => new Map([[f.path, {}], ["src/characters/other.js", {}]]);
+  await assert.rejects(() => coordinator.accountRename(7), /different character file/);
+  assert.ok(f.calls.filter((call) => call.method && call.method !== "GET").every((call) => call.url.startsWith("statuses/")));
+});
 
 test("daily character intake accepts only bounded data and never executes source", () => {
   const source = characterSource({ handle: "owner", joined: 1, lastCommit: 2 });
@@ -50,6 +248,7 @@ test("midnight gates are UTC, never merge empty or manual bundles, and reused bu
   assert.equal(due(state, new Date("2026-10-05T00:00:00Z")), true);
   assert.equal(due({ ...state, entries: [] }, new Date("2026-10-05T00:30:00Z")), false);
   assert.equal(due({ ...state, lane: "manual" }, new Date("2026-10-05T00:30:00Z")), false);
+  assert.equal(due({ ...state, lane: "rename" }, new Date("2026-10-05T00:30:00Z")), false);
   assert.equal(due({ ...state, openedOn: "2026-10-05" }, new Date("2026-10-05T00:30:00Z")), false);
   assert.throws(() => readManifest(JSON.stringify({ version: 1, lane: "daily", openedOn: "2026-10-04", entries: [{ path: "../auth.js" }] }), "daily"));
 });
@@ -74,7 +273,7 @@ test("empty bundle identity checks pass only for validated placeholders and stil
     else throw new Error(`Unexpected request: ${path}`);
     return new Response(JSON.stringify(data));
   });
-  for (lane of ["daily", "manual"]) {
+  for (lane of LANES) {
     const pr = { user: { login: bot }, head: { sha: head, ref: `automation/characters-${lane}-abc`, repo: { full_name: repo } },
       base: { ref: "rock", repo: { full_name: repo } }, merge_commit_sha: "merged" };
     assert.deepEqual(await checkCharacterIdentities(pr), []);
@@ -187,6 +386,130 @@ test("the scanner checks earlier character revisions and extracts only character
   current = null;
   author = "attacker";
   await assert.rejects(inspectSubmission(gh, { pr: 7, head }, rock), CharacterRejection);
+});
+
+const renameBase = `(() => {
+  "use strict";
+  const BL = window.BL;
+  BL.characters.add({
+    handle: "cave-name",
+    github: "owner",
+    joined: 1,
+    lastCommit: 2,
+    dress: { crown(k, v) { v.set(0, 0, 0, k.P.black); } }
+  });
+})();
+`;
+const renameSource = renameBase.replace('    handle: "cave-name",\n', '    handle: "cave-name",\n    display: "owner",\n');
+
+test("independent GitHub display renames preserve every non-display byte and literal identity", () => {
+  assert.equal(isGitHubDisplayRename(renameBase, renameSource), true);
+  assert.equal(isGitHubDisplayRename(renameSource.replace('display: "owner"', 'display: "Old Name"'), renameSource), true);
+  for (const source of [renameBase, renameSource + "\n", renameSource.replace('github: "owner"', 'github: "other"'),
+    renameSource.replace('handle: "cave-name"', 'handle: "other"'), renameSource.replace('lastCommit: 2', 'lastCommit: 3'),
+    renameSource.replace('k.P.black', 'k.P.white'), renameSource.replace('display: "owner"', 'display: "someone-else"'),
+    renameSource.replace('display: "owner"', 'display: ("owner")'), renameSource.replace('display: "owner"', 'display: "owner", display: "owner"'),
+    renameSource.replace('    display:', '  display:'), renameSource.replace('display: "owner"', 'display: `owner`'),
+    renameSource.replace('display: "owner"', 'display: "ow\\ner"'), renameSource.replace('display: "owner"', 'display: call()'),
+    renameSource.replace('dress:', '/* BL.characters.add({ */ dress:')]) assert.equal(isGitHubDisplayRename(renameBase, source), false);
+  assert.equal(isGitHubDisplayRename(renameSource, renameBase), false);
+  assert.equal(isGitHubDisplayRename(null, renameSource), false);
+  assert.equal(isGitHubDisplayRename(renameBase.replace('    github: "owner",\n', ''), renameSource.replace('    github: "owner",\n', '').replace('display: "owner"', 'display: "cave-name"')), true);
+});
+
+test("rename intake requires immutable operator authority and cosmetic-only history", async () => {
+  const rock = "a".repeat(40), head = "b".repeat(40), old = "c".repeat(40), path = "src/characters/cave-name.js";
+  let user = { ...OPERATORS[0], type: "User" }, permission = "admin", earlier = false;
+  const gh = {
+    list: async () => [...(earlier ? [{ sha: old }] : []), { sha: head }],
+    api: async (url) => {
+      if (url === "pulls/7") return { number: 7, user, base: { ref: "rock" }, head: { sha: head } };
+      if (url.startsWith("collaborators/")) return { permission };
+      if (url.startsWith("compare/")) return { merge_base_commit: { sha: rock }, total_commits: earlier ? 2 : 1, files: [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: user, parents: [{ sha: earlier && url.includes(head) ? old : rock }], files: [{ filename: path, status: "modified" }] };
+      throw new Error(`Unexpected request ${url}`);
+    },
+    file: async (ref) => ({ sha: ref, source: ref === rock ? renameBase : ref === old ? renameBase.replace('lastCommit: 2', 'lastCommit: 3') : renameSource })
+  };
+  const lane = async () => (await inspectSubmission(gh, { pr: 7, head }, rock)).entries[0].lane;
+  assert.equal(await lane(), "rename");
+  user.id = 1; assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "Bot" }; assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "User" }; earlier = true; assert.equal(await lane(), "manual");
+  earlier = false; user = { login: "owner", id: 42, type: "User" }; permission = "read";
+  assert.equal(await lane(), "manual");
+  user = { ...OPERATORS[0], type: "User" };
+  await assert.rejects(lane, /Only the GitHub owner/);
+});
+
+test("rename migration preserves held custom submissions, revalidates provenance and requires fresh approval", async () => {
+  const repo = "example/land", bot = "private-app[bot]", rock = "a".repeat(40), sourceHead = "b".repeat(40);
+  const user = { ...OPERATORS[0], type: "User" }, path = "src/characters/cave-name.js", heldPath = "src/characters/held.js";
+  const heldSource = safeCharacterSource({ handle: "held", joined: 1, lastCommit: 2 });
+  const held = { pr: 9, head: "c".repeat(40), author: "held", path: heldPath, base: null, hash: digest(heldSource), lane: "manual" };
+  const old = { pr: 6, head: "d".repeat(40), author: user.login, path, base: rock, hash: digest(renameSource), lane: "manual" };
+  const files = new Map([[rock, new Map([[path, { source: renameBase, sha: rock }]])], [sourceHead, new Map([[path, { source: renameSource, sha: sourceHead }]])]]);
+  const prs = LANES.map((lane, i) => {
+    const head = String(i + 1).repeat(40), state = { version: 1, lane, openedOn: "2026-10-04", entries: lane === "manual" ? [held, old] : [] };
+    files.set(head, new Map([[manifestPath(lane), { source: JSON.stringify(state) }],
+      ...(lane === "manual" ? [[path, { source: renameSource }], [heldPath, { source: heldSource }]] : [])]));
+    return { number: i + 1, state: "open", user: { login: bot }, head: { sha: head, ref: `automation/characters-${lane}-round`, repo: { full_name: repo } }, base: { ref: "rock", repo: { full_name: repo } } };
+  });
+  const sourcePr = { number: 7, state: "open", user, head: { sha: sourceHead, ref: "rename", repo: { full_name: repo } }, base: { ref: "rock", repo: { full_name: repo } } };
+  const writes = [], statuses = new Map(); let sequence = 10, reviews = [];
+  const gh = { repo,
+    tree: async () => files.get(rock),
+    file: async (sha, name) => files.get(sha)?.get(name) || null,
+    list: async (url) => url.endsWith("/commits") ? [{ sha: sourceHead }] : url.endsWith("/reviews") ? reviews : url.endsWith("/comments") ? [] : prs,
+    commit: async (branch, expected, additions, deletions) => {
+      const pr = prs.find(row => row.head.ref === branch); assert.equal(pr.head.sha, expected);
+      assert.deepEqual(deletions, []); const next = new Map(files.get(expected));
+      for (const file of additions) next.set(file.path, { source: file.source });
+      const sha = String(sequence++).padStart(40, "0"); files.set(sha, next); pr.head.sha = sha;
+      writes.push({ branch, additions }); return sha;
+    },
+    api: async (url, method, data) => {
+      if (url === "git/ref/heads/rock") return { object: { sha: rock } };
+      if (url.startsWith("collaborators/")) return { permission: "admin" };
+      if (url.startsWith("statuses/")) { statuses.set(url + ":" + data.context, data.state); return {}; }
+      if (url.endsWith("/comments")) return {};
+      if (/^pulls\/\d+$/.test(url)) { const pr = Number(url.split("/")[1]) === 7 ? sourcePr : prs.find(row => row.number === Number(url.split("/")[1])); if (method === "PATCH") Object.assign(pr, data); return pr; }
+      if (url === `commits/${sourceHead}?per_page=100`) return { author: user, parents: [{ sha: rock }], files: [{ filename: path, status: "modified" }] };
+      if (url.startsWith("commits/")) return { author: { login: bot }, commit: { verification: { verified: true } } };
+      if (url.startsWith("compare/")) {
+        const sha = url.split("...")[1];
+        return { behind_by: 0, merge_base_commit: { sha: rock }, total_commits: 1, commits: [{ sha: sourceHead }],
+          files: [...files.get(sha)].filter(([name, file]) => file.source !== files.get(rock).get(name)?.source)
+            .map(([filename]) => ({ filename, status: filename === path ? "modified" : "added" })) };
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }
+  };
+  const coordinator = createCoordinator(gh, bot, () => new Date(NOW));
+  const manual = prs[1], rename = prs[2], queued = files.get(manual.head.sha).get(path);
+  queued.source += "\n";
+  await assert.rejects(coordinator.intake({ pr: 7, head: sourceHead }), /differs from its verified source/);
+  assert.equal(writes.length, 0);
+  queued.source = renameSource;
+  await coordinator.intake({ pr: 7, head: sourceHead });
+  const manualFiles = files.get(manual.head.sha), renameFiles = files.get(rename.head.sha);
+  assert.deepEqual(JSON.parse(manualFiles.get(manifestPath("manual")).source).entries, [held]);
+  assert.equal(manualFiles.get(heldPath).source, heldSource);
+  assert.equal(manualFiles.get(path).source, renameBase);
+  assert.equal(renameFiles.get(path).source, renameSource);
+  assert.equal(JSON.parse(renameFiles.get(manifestPath("rename")).source).entries[0].head, sourceHead);
+  assert.equal(sourcePr.state, "closed");
+  const gate = () => statuses.get(`statuses/${rename.head.sha}:Character bundle safety`);
+  assert.equal(gate(), "pending");
+  reviews = [{ user, state: "APPROVED", commit_id: "old" }];
+  await coordinator.intake({ pr: rename.number }); assert.equal(gate(), "pending");
+  reviews[0].commit_id = rename.head.sha;
+  await coordinator.intake({ pr: rename.number }); assert.equal(gate(), "success");
+  reviews[0].state = "CHANGES_REQUESTED";
+  // The held submission's source is deliberately unavailable in this fixture.
+  // Report its failed validation while still refreshing the rename gate.
+  await assert.rejects(coordinator.refreshReviews()); assert.equal(gate(), "pending");
+  assert.equal(writes.length, 2);
 });
 
 test("queued custom identities reserve defaults without executing source and require trusted provenance", async () => {
@@ -482,4 +805,47 @@ test("the browser accepts one matching temporary identity without reordering the
   assert.equal(c.roster.length, 2);
   assert.equal(c.activeRoster[1].temporary, true);
   assert.equal(BL.characters.get("new-ooga").temporary, true);
+});
+
+
+test("verified numeric owner keeps the custom character across renames; old-login claimants fail closed", async () => {
+  const lookup = createOwnedCharacterLookup([{ handle: "Bitcoin-Bill", github_login: "Bitcoin-Bill",
+    joined_at: "2026-09-01T00:00:00Z", last_commit_at: "2026-10-04T11:00:00Z" }], async () => { throw new Error("Pinned identity must not consult fallback"); });
+  for (const login of ["Bitcoin-Bill", "Bitclank-Bill", "BITCLANK-BILL"])
+    assert.equal((await lookup(login, 185141343)).handle, "Bitcoin-Bill");
+  assert.equal(await lookup("Bitcoin-Bill", 99), null);
+  assert.equal(await lookup("Bitcoin-Bill"), null);
+});
+
+test("cutover preparation emits nothing until both GitHub lookups verify the renamed numeric account", async () => {
+  const { prepareAccountMigration } = await import("../../scripts/account-migration.mjs");
+  const input = { id:42, oldLogin:"old-name", newLogin:"new-name", lastOldAt:"2026-11-01T00:00:00.000Z" }, now = Date.parse("2026-11-02T00:00:00Z");
+  await assert.rejects(prepareAccountMigration(input,async () => Response.json({ id:42,login:"old-name" }),now),/not verified/);
+  await assert.rejects(prepareAccountMigration(input,async url => Response.json({ id:url.includes("user/42")?42:99,login:"new-name" }),now),/different account/);
+  const result = await prepareAccountMigration(input,async () => Response.json({ id:42,login:"new-name" }),now);
+  assert.equal(result.sql.oogaboogaland.length,2);
+  assert.ok(result.sql.oogaboogaland[0].includes("WHERE id=42 AND lower(login)='old-name'"));
+  assert.ok(result.sql.oogatron[0].includes(input.lastOldAt));
+  await assert.rejects(prepareAccountMigration({ ...input,lastOldAt:"2027-01-01T00:00:00.000Z" },async () => assert.fail(),now),/ISO UTC/);
+});
+
+
+test("activity and public labels use the current owner login, never a reused permanent art handle", () => {
+  const context = { window: {}, URLSearchParams, location: { search: "" } };
+  for (const name of ["math", "characters", "contributor-identities", "activity-repos"])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const BL = context.window.BL;
+  BL.characters.add({ handle: "Bitcoin-Bill", github: "Bitclank-Bill", display: "Bill", joined: 1, lastCommit: 2 });
+  runInNewContext(readFileSync(new URL("../../src/js/contributors.js", import.meta.url), "utf8"), context);
+  assert.equal(BL.characters.get("Bitcoin-Bill").handle, "Bitcoin-Bill", "art references stay stable");
+  assert.equal(BL.characters.ownedBy("bitcoin-bill"), null);
+  assert.equal(BL.characters.displayOfLogin("bitcoin-bill"), "bitcoin-bill");
+  assert.equal(BL.characters.displayOfLogin("BITCLANK-BILL"), "Bill");
+  const c = BL.contributors, before = c.roster[0].lastCommitAt;
+  assert.equal(c.applySnapshot(snapshot(person("Bitcoin-Bill")), NOW), 0);
+  assert.equal(c.roster[0].lastCommitAt, before);
+  assert.equal(c.roster[0].lastContributionAt, 0);
+  assert.equal(c.applySnapshot(snapshot(person("Bitclank-Bill")), NOW), 1);
+  assert.equal(c.roster[0].lastCommitAt, Date.parse(person("Bitclank-Bill").last_seen_at));
+  assert.equal(c.roster[0].lastContributionAt, c.roster[0].lastCommitAt);
 });

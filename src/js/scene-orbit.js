@@ -118,7 +118,8 @@
   // REEL holds where the sky hook reels the flight from (x0,y0,z0) and to (x1,y1,z1).
   const REEL = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
   let orbited = false, spaceCalled = false, stagesDropped = 0, chuteCalled = false, warnAt = 0, flipAt = 0, leanHinted = false, result = null, failure = null, score = 0;
-  let stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0;
+  let scoreTicket = null, unwatchScores = null;
   const placed = [];
   const debris = [];
   const fireballs = [];
@@ -139,12 +140,6 @@
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ox: 0, oy: 0, oz: 0, ax: 0, ay: 0, az: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, buildYaw: -0.64, buildPitch: 0.18, buildZoom: 1, shake: 0 };
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
-  const orbitScene = {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    get inMotion() {
-      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
-    }
-  };
 
   // Islands, then the site's pad and deck, else the sea (the flight reads the sea from its own height).
   const groundAt = (x, z) => {
@@ -384,6 +379,8 @@
     refreshBuilder();
     if (preset) hud.toast(`${preset.name} on the pad`);
   };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the pilot button is for the rest.
+  const ownPilot = () => BL.net.ownAmong(contributors.roster);
   const cyclePilot = () => {
     const roster = contributors.roster, i = roster.findIndex((c) => c.name === selection.pilot);
     selection.pilot = roster[(i + 1) % roster.length].name;
@@ -523,6 +520,8 @@
 
   const toBuild = () => {
     phase = "build";
+    hud.setPanelsHidden(false);
+    rhud.lockPilot(!!ownPilot());
     flight = null;
     release = null;
     igniteIn = 0;
@@ -553,9 +552,11 @@
     }
     game.setOrbitBuild(stack);
     if (phase === "results") toBuild();
+    scoreTicket = BL.highscores?.begin("orbit") || null;
     flight = rocketMod.create({ stack, groundAt, onDrop });
     flight.reset(spot.x, spot.padY, spot.z);
     phase = "count";
+    hud.setPanelsHidden(true);
     phaseT = 0;
     countShown = 0;
     gauge = 0;
@@ -593,7 +594,6 @@
     hud.el.act.hidden = !COARSE;
     hud.setAct("Release!");
     hud.setSubtitle("Ooga Orbit · counting down");
-    window.clearTimeout(hintTimer);
     hud.hint("", 0);
     cam.warm = false;
     cam.offset = cam.tilt = 0;
@@ -839,6 +839,7 @@
   const finish = () => {
     const s = flight.state;
     phase = "results";
+    hud.setPanelsHidden(false);
     const place = failure ? null : where();
     const dist = Math.hypot(s.p.x - spot.x, s.p.z - spot.z);
     let landScore = 0;
@@ -865,6 +866,8 @@
     const medal = rhud.medalFor(score);
     const landing = failure || place;
     const improved = game.recordOrbit({ score, orbit: orbited, landing, parts: stack.length });
+    BL.highscores?.submit(scoreTicket, "orbit-1", score);
+    scoreTicket = null;
     result = { score, medal, improved, landing, orbit: orbited, failure, dist, peakHeat: s.peakHeat, maxAlt: s.maxAlt };
     const rows = [
       ["Clamps", release ? `${release.toUpperCase()}${release === "perfect" ? ` · ${SCORE.perfect}` : release === "good" ? ` · ${SCORE.good}` : ""}` : "held"],
@@ -1848,24 +1851,25 @@
     audio.unlock();
     quieted = false;
   };
+  const controlCopy = touch => touch ? "The button does each step · left stick steers"
+    : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (phase === "build") go(home);
       else toBuild();
     }
-    if (e.key === "Enter" && (phase === "build" || phase === "results")) launch();
-    if (e.key === "0") {
+    if (BL.controls.matches(e, "start") && (phase === "build" || phase === "results")) launch();
+    if (BL.controls.matches(e, "resetView")) {
       cam.offset = cam.tilt = 0;
       cam.buildYaw = -0.64;
       cam.buildPitch = 0.18;
       cam.buildZoom = 1;
     }
-    if (e.key === "m" || e.key === "M") toggleMute();
-    if ((e.key === "g" || e.key === "G") && !e.repeat) {
+    if (BL.controls.matches(e, "autopilot") && !e.repeat) {
       selection.assist = !selection.assist;
       hud.toast(selection.assist ? "Autopilot leans the climb (A D still steer)" : "Flying the climb by hand: follow the yellow line");
     }
-    if ((e.key === "v" || e.key === "V") && !e.repeat) startEva();
+    if (BL.controls.matches(e, "spacewalk") && !e.repeat) startEva();
     if (e.key === "b" || e.key === "B") {
       world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
@@ -1881,12 +1885,13 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("orbit", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -1931,6 +1936,8 @@
       selection.pilot = world.pilot;
       world.pilot = null;
     }
+    const own = ownPilot();
+    if (own) selection.pilot = own;
     rockNode = place(createNode({ geometry: rocketModels.spaceRock(), visible: false }));
     tetherNode = place(createNode({ geometry: rocketModels.tether(), quaternion: quat.create(), visible: false }));
     buildPassenger();
@@ -1939,19 +1946,21 @@
     selected = -1;
     rhud = rocketHud.create({
       best: () => game.state.orbit.best, onAdd: addPart, onMove: movePart, onRemove: removePart, onSelect: selectPart, onPreset: usePreset, onPilot: cyclePilot,
+      sharedBest: () => BL.highscores?.best("orbit", "orbit-1") ?? null,
       onInsert: insertPart, onMoveTo: movePartTo, slots: rocketSlots
     });
     rhud.buildPalette();
     rhud.buildMission();
     rhud.setPilot(selection.pilot);
     rhud.refreshBest();
+    unwatchScores = BL.highscores?.watch("orbit", () => rhud.refreshBest()) || null;
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     orbitScene.agentControls = controls;
     audio = rocketAudio.create();
     quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
-    window.addEventListener("pointerdown", onGesture);
-    window.addEventListener("keydown", onGesture);
+    window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
+    window.addEventListener("keydown", onGesture, { signal: ctx.signal });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -2007,10 +2016,7 @@
     for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
-    hud.el.sheet.dataset.open = "false";
-    rhud.el.help.textContent = COARSE
-      ? "The button does each step · left stick steers"
-      : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
+    rhud.el.help.textContent = controlCopy(COARSE);
     document.getElementById("orbit-help").textContent = COARSE ? "Tap a part to add it · hold and drag it onto the rocket" : "Tap or drag a part onto the rocket · drag a row off to remove it";
     if (COARSE) rhud.el.evaBtn.querySelector("small").textContent = "the button";
     cam.buildYaw = -0.64;
@@ -2021,7 +2027,6 @@
       for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Stack a rocket, then Launch!" : "Stack a rocket, then Launch! (Enter)"), 1200);
     Object.assign(orbitScene, {
       root, camera, input,
       debug: {
@@ -2094,8 +2099,8 @@
     });
   };
   const leave = () => {
+    unwatchScores?.(); unwatchScores = null; scoreTicket = null;
     window.clearInterval(stateTimer);
-    window.clearTimeout(hintTimer);
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     audio.dispose();
@@ -2132,7 +2137,32 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, smoke: smoke.count, debris: debris.length };
   };
-  Object.assign(orbitScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  const orbitScene = BL.deferred.scene("orbit", {
+    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    get inMotion() {
+      return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
+    }
+  });
   BL.scenes = BL.scenes || {};
+  orbitScene.controlsHelp = touch => {
+    const H = BL.controlsHelp, rows = [];
+    if (phase === "build") rows.push(H.row([], "Add a part · drag it onto the rocket or drag a row off to remove it", "Tap / drag"));
+    else if (touch) rows.push(...H.fromCopy(phase === "eva" ? "Left stick flies where you look · right stick down and up · drag to look · action button at the rock" : controlCopy(true), true));
+    else {
+      rows.push(H.movement(phase === "eva" ? "Fly where you look" : "Forward/back pushes · left/right steers"));
+      if (phase === "eva") rows.push(H.row(BL.controls.keysFor(...(COARSE ? ["pitchDown", "pitchUp"] : ["yawLeft", "yawRight"])), "Down / up"));
+      else {
+        rows.push(H.row(BL.controls.keysFor("yawLeft", "yawRight"), "Turn"), H.row(BL.controls.shortcutKeys("autopilot"), "Toggle climb autopilot"));
+        if (phase === "orbit") rows.push(H.row(BL.controls.shortcutKeys("spacewalk"), "Start spacewalk"));
+      }
+      rows.push(H.row([" "], phase === "eva" ? "Use space rock / return to pod" : "Next flight step / stage"));
+    }
+    if (phase === "build" || phase === "results") rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), "Launch", touch ? "Launch button" : ""));
+    if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"));
+    if (touch) rows.push(H.row([], "Return to builder", "Build button"));
+    rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave Ooga Orbit" : phase === "build" ? "Leave" : "Return to builder", touch ? "Back button" : ""));
+    return { title: "Ooga Orbit", rows };
+  };
   BL.scenes.orbit = orbitScene;
 })();

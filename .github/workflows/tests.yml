@@ -1,0 +1,36 @@
+name: Unit tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit · the browser-free lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Refresh the deployment snapshot for a pinned account rename
+        if: github.event_name == 'pull_request'
+        run: node scripts/account-rename-snapshot.mjs
+        env:
+          CHARACTER_SNAPSHOT_BASE: ${{ github.event.pull_request.base.sha }}
+      - name: Run the unit lane
+        run: npm run test:unit
+      - name: Check shared Cloud Hopper replay publication and playback
+        run: node --test worker/test/cloud-hopper-replays.test.mjs worker/test/highscores.test.mjs

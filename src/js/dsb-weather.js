@@ -29,13 +29,13 @@
     apply(BL.chain.snapshot);
     const unsubscribe = BL.chain.subscribe(apply);
     const gate = () => {
-      state.exterior = !interior && !document.hidden;
+      state.exterior = !interior;
       state.audioEnabled = state.exterior && !muted;
       shared.setExterior(state.exterior);
       shared.setMuted(muted);
     };
-    document.addEventListener("visibilitychange", gate);
     gate();
+    const offSound = BL.sound.subscribe(on => { muted = on; gate(); });
     const setInterior = on => { interior = !!on; gate(); };
     const setMode = name => {
       if (!params.has("debug")) return false;
@@ -87,9 +87,9 @@
     };
     return {
       state, shared, update, setInterior, setMode,
-      toggleMuted: () => { muted = !muted; gate(); return muted; },
+      toggleMuted: () => BL.sound.toggle(),
       strike: () => { if (params.has("debug") && shared.state.soak >= .65) shared.strike(); },
-      dispose: () => { unsubscribe(); document.removeEventListener("visibilitychange", gate); shared.dispose(); }
+      dispose: () => { offSound(); unsubscribe(); shared.dispose(); }
     };
   };
   BL.dsbWeather = { create, override };

@@ -5,12 +5,12 @@
 // with claw machines, pinball and dart boards under it; pool and air hockey in the back room before it. Sports on the right (two skee-ball lanes, air hockey and
 // two hoop shots), the coconut shy, the food court and the snack bar on the left, each carnival machine opening a
 // game of its own (`scene-carnival.js`); a prize counter by the doorway where the tickets they pay buy prizes; the
-// game-room gorillas, the arcade's uniformed staff, going from job to job round the hall; and Oogas from the roster
-// playing everything the visitor is not.
+// game-room gorillas, the arcade's uniformed maintenance staff, going from job to job round the hall.
+// Every Ooga visitor is a live player; machines run attract displays until a player starts them.
 //
 // Walking up to a cabinet or a carnival machine and pressing act (or tapping it) opens that game, and the game's exit
 // comes back to it as the same Ooga (`lastPlayer`). The carnival games are scenes of their own (`scene-carnival.js`);
-// here their machines stand at rest, showing their coconuts and the visitor's best. Escape, the Leave button and the
+// here their machines stand at rest, showing their coconuts and each machine's shared best (local offline). Escape, the Leave button and the
 // doorway go back to the island.
 (() => {
   "use strict";
@@ -20,7 +20,7 @@
   const AM = BL.arcadeModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
-  const { HALL, STAGE, MEZZ, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
+  const { HALL, STAGE, MEZZ, HAUNT, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
 
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const PITCH = [-0.2, 1.3], DIST = [3, 27];
@@ -28,6 +28,7 @@
   const FLY = { speed: 5, perDist: 0.4, climb: 3, yMax: HALL.h - 1.5 };
   const view = (x, y, z, yaw, pitch, dist) => ({ yaw, pitch, dist, target: { x, y, z } });
   const live = LAYOUT.cabinets.filter((c) => c.game >= 0);
+  const VIEW_NAMES = { entrance: "Overview", cabinets: "Games", hoops: "Hoop Shot", skee: "Thro-ball", shy: "Coconut Toss", snacks: "Snacks" };
   const PRESETS = {
     entrance: view(0, 2, -8, 0.3, 0.22, 14),
     cabinets: view(0, 2.6, -8.2, 0, 0.1, 8.2),
@@ -36,7 +37,11 @@
     shy: view(-15.31, 1.6, -6.8, Math.PI / 2 + 0.3, 0.2, 6.5),
     snacks: view(-14.9, 1.6, 4.6, Math.PI - 0.35, 0.2, 7)
   };
-  for (const c of live) PRESETS[GAMES[c.game].id] = view(c.x, c.y + 1.4, c.z + 0.4, 0, 0.1, 4.2);
+  for (const c of live) {
+    const turn = c.y === MEZZ.y ? c.turn : 0;
+    PRESETS[GAMES[c.game].id] = view(c.x + Math.sin(turn) * 0.4, c.y + 1.4, c.z + Math.cos(turn) * 0.4, turn, 0.1, 4.2);
+    VIEW_NAMES[GAMES[c.game].id] = GAMES[c.game].name;
+  }
   // A portrait screen sees a third of the hall's width at the same distance, so there these views step back and turn
   // square to their subject: all four stage cabinets, both hoops, and the snack bar's and the coconut toss's signs
   // clear the screen's edges and sit under the nav. `views` hands the pilot whichever framing the screen wants when a
@@ -70,27 +75,40 @@
     changer: ["Token totem", "Banana in, token out. Good trade."],
     muncher: ["Ticket muncher", "Muncher eat paper tickets. Yours safe on board. Muncher sad."],
     door: ["Back room", "Big door. Locked tight. No poker here! (maybe somewhere else?)"],
-    fame: ["Hall of fame", "Best Oogas up there. Beat them, you go up too!"],
+    fame: ["Machine records", "Shared machine bests. M is the machine number; LOC is this browser's best while offline. Sign in to set a shared record!"],
     disco: ["Spirit rattle", "Gourds clack, shells clink. Oogas dance."]
   };
   const ORDERS = ["Banana split! Ooga slurp slurp.", "Coconut milk, fresh from coconut. Ahh.", "Grub on stick. Ooga crunch!", "Lava pop. Hot hot hot. Good!"];
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null;
+  let repair = null, cabinetView = null, openingRequest = 0, queuedCabinet = null;
+  const cabinetHidden = new Map();
+  let cabinetFocus = null;
+  let captureOnArrival = false;
+  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null, promptOccupied = null;
+  // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
+  // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
+  // (in the arena), the voice zone it reports and the one it is turning to, which half of the hallway it is on, how far
+  // along the hallway it stands and how loud the hunt's music and sound play for it (#422).
+  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, rifleWas = false;
+  let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null, hallwayFar = false, hallwayAlong = 0, huntHearing = 0;
+  let outsideWeapon = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
+  let unwatchHockey = null, hockeyPlayers = null;
   let audio = null, bots = null, walkers = null, motes = null, power = null, disco = null, fame = null, shelf = null, lit = null;
   let ambientT = 0, wheelTick = 0, cheerT = 0, powerT = 99;
   // Who walked in, kept across a game so they come back out as themselves, and the ticket balance at the last visit,
   // so the wheel knows when to celebrate.
   let lastPlayer = null, lastTickets = null, unsubscribeAccount = null, remotes = null, footsteps = null;
-  const NO_ACTORS = [];
-  // An Ooga a signed-in player drives here is not also in the crowd or out strolling.
-  const hideCrowd = (name, on) => {
-    for (const list of [crowd, walkers]) if (list) for (const m of list) if (m.cave.traits.name === name) m.cave.root.visible = !on;
+  const scoreSubscriptions = [];
+  const machineBest = (kind, id) => kind === "hockey" ? 0 : BL.highscores.best(kind, id) ?? game.arcadeBest(id);
+  const refreshScores = (kind) => {
+    for (const station of stations) if (station.kind === "machine" && station.game.kind === kind && !station.game.playing) station.game.stop();
+    if (fame && FAME_GAMES.some((entry) => entry[1] === kind)) fame.children[2].geometry = AM.fameBoard(fameRows());
   };
-  // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
-  // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
+  const NO_ACTORS = [];
+  // The island's ownership rules also govern local possession and room presence here.
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name, contributors.stateFor(cave.contributor) === "working");
   const mayPick = (c) => !BL.net.mayDrive(c.name, contributors.stateFor(c) === "working");
   const accountChanged = () => {
@@ -142,16 +160,52 @@
   // Into a game; a carnival machine names which of its kind (`place`), and the game comes back to it.
   const open = (id, place = null) => {
     if (leaving) return;
-    if (go(id, place)) leaving = openingGame = true;
+    if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
+    const cabinetId = id === "hub" && place === "cloud-hopper" ? "cloud-hopper" : id;
+    const cabinet = LAYOUT.cabinets.find(c => (c.game >= 0 ? GAMES[c.game].id : AM.RETRO[c.retro].id) === cabinetId);
+    if (!cabinet) {
+      const preferred = id === "hockey" && Number.isInteger(place) && BL.hockeyWire.TABLES[place] && avatar && avatar.root.position.z < BL.hockeyWire.TABLES[place][1] ? 1 : 0;
+      if (go(id, place)) { if (id === "hockey") world.hockeyEnd = preferred; leaving = openingGame = true; } return;
+    }
+    const occupied = BL.net.cabinetSeats.get(cabinetId);
+    if (occupied && occupied.player !== BL.net.state.selfId) { hud.toast(`${occupied.name} is playing · cabinet occupied`); return; }
+    const actor = pilot.player || avatar;
+    if (!actor) { hud.toast("Choose your Ooga before opening a cabinet"); return; }
+    const request = ++openingRequest;
+    leaving = true;
+    pilot.controls.reset();
+    const at = BL.arcadeCabinets.get(cabinetId);
+    actor.root.position.x = at.x; actor.root.position.y = at.y + actor.baseY; actor.root.position.z = at.z;
+    actor.root.rotation.y = at.yaw;
+    BL.net.setBody(actor.traits.name); BL.net.setZone("arcade.hall");
+    BL.net.sendPose(at.x, at.y, at.z, at.yaw);
+    BL.net.takeCabinet(cabinetId).then(reason => {
+      if (request !== openingRequest || !hud) return;
+      if (reason) { leaving = false; hud.toast(reason); return; }
+      openingGame = true; cabinetFocus = cabinet;
+      cabinetView.begin(cabinetId, cabinet, camera, screens[LAYOUT.cabinets.indexOf(cabinet)].node);
+    });
   };
-  const play = (i) => open(GAMES[i].id);
-  // The game's deferred code did not arrive: the visitor stays in the hall, and its cabinets and way out work again.
-  const stay = () => { leaving = openingGame = false; };
+  const play = (i) => GAMES[i].id === "cloud-hopper" ? open("hub", "cloud-hopper") : open(GAMES[i].id);
+  const revealCabinetPlayers = () => {
+    for (const [node, before] of cabinetHidden) node.cameraHidden = before;
+    cabinetHidden.clear();
+  };
+  const hideCabinetActor = (node, at = node?.position) => {
+    if (!node || !cabinetFocus) return;
+    const dx = at.x - cabinetFocus.x, dz = at.z - cabinetFocus.z;
+    if (dx * dx + dz * dz > 16 || Math.abs(at.y - cabinetFocus.y) > 3) return;
+    if (!cabinetHidden.has(node)) cabinetHidden.set(node, node.cameraHidden);
+    node.cameraHidden = true;
+  };
+  // A cabinet return or interrupted load makes the hall playable again.
+  const stay = () => { leaving = openingGame = false; revealCabinetPlayers(); cabinetFocus = null; captureOnArrival = true; };
 
   // The line under each loop: the visitor's best in that game, or a call to play. A retro game's best is an arcade one.
   const bestOf = (id) => {
     const s = game.state;
-    if (id === "race") return s.race.cup ? `${s.race.cup.medal.toUpperCase()} CUP` : "PLAY!";
+    if (id === "race") return "";
+    if (id === "cloud-hopper") return "PLAY!";
     if (id in s.arcade) return s.arcade[id] ? `HI ${s.arcade[id]}` : "PLAY!";
     const best = s[id].best;
     return best ? `HI ${best.score}` : "PLAY!";
@@ -168,31 +222,63 @@
   const square = (x, z, r, feet = FLOOR_FEET) => blocks.push([x - r, x + r, z - r, z + r, feet[0], feet[1]]);
   // The dressing's pieces that stand on a floor in a walker's way, blocked round their pick spheres.
   const STANDING = new Set(["barrel"]);
-  // The stump's roots and ferns over the floor round its sides and back (never its front, where the visitor steps
-  // up): two boxes across the stump, [half-width, reach behind its middle], one wide and one deep, both to
-  // `ROOTS_FRONT` m in front of its middle, so a walker slides round them. They are in the way of feet on the floor
-  // only: an Ooga on the stage may step down over the roots and walk out, but none walks in over them.
-  const ROOTS = [[5.29, 3.22], [3.22, 5.29]], ROOTS_FRONT = 2.53, ROOT_FEET = [-1, STAGE.low / 2];
-
-  // Oogas from the roster at play, each in a pose the scene animates with part rotations only: at a claw machine,
-  // pinball, air hockey, skee-ball lane 2 and hoop shot 2, at the food court's tables, queueing at the snack bar and
-  // cheering the cabinets from the ring's front-left, off the doorway's view of their screens. [x, z, facing, pose];
-  // seated ones sit on a stool of the table they face, the air hockey pair at the two ends of their table, along its
-  // `turn`.
-  const H0 = LAYOUT.hockeys[0], H0X = Math.sin(H0.turn) * 1.45, H0Z = Math.cos(H0.turn) * 1.45;
-  const CROWD = [
-    [LAYOUT.skee[1].x, LAYOUT.skee[1].z, Math.PI, "skee"], [LAYOUT.hoops[1].x, LAYOUT.hoops[1].z, Math.PI / 2, "shoot"],
-    [H0.x + H0X, H0.z + H0Z, H0.turn + Math.PI, "hockey"], [H0.x - H0X, H0.z - H0Z, H0.turn, "hockey"],
-    [LAYOUT.pinball[0][0], LAYOUT.pinball[0][1] + 1.05, Math.PI, "pinball"], [LAYOUT.claws[0][0], LAYOUT.claws[0][1] + 0.95, Math.PI, "claw"],
-    [LAYOUT.tables[0][0], LAYOUT.tables[0][1] + 0.85, Math.PI, "sit"], [LAYOUT.tables[1][0], LAYOUT.tables[1][1] + 0.85, Math.PI, "sit"],
-    [-16.6, 2.3, 0, "queue"], [STAGE.x - 3.4, STAGE.z + 3.8, 2.41, "cheer"]
-  ];
-  // A sitter's hips rest on the stool's top; a standing Ooga's arms hang this far out from its middle.
-  const SEAT_Y = 0.6, CROWD_REACH = 0.55;
   const build = () => {
     const hall = AM.hall(), frame = AM.signFrame(), S = LAYOUT.sign;
     addChild(root, createNode({ geometry: hall.floor }), createNode({ geometry: hall.rock }), createNode({ geometry: hall.timber }),
       createNode({ geometry: hall.outside, sightHidden: true }));
+    // The haunted hallway off the deck's right end, and its carved sign over the mouth, facing the hall.
+    const haunt = AM.haunt(), ghostSign = BL.hubModels.caveSign("Ghost Hunter", "ghost", false, true), gb = boundsOf(ghostSign), gk = 3.2 / (gb.max[0] - gb.min[0]);
+    addChild(root, createNode({ geometry: haunt.rock }), createNode({ geometry: haunt.props }), createNode({ geometry: haunt.glass, sightHidden: true }),
+      createNode({ position: { x: HALL.halfW - 0.28, y: HAUNT.y + HAUNT.h + 0.62, z: (HAUNT.z0 + HAUNT.z1) / 2 }, rotation: { x: 0, y: -Math.PI / 2, z: 0 }, scale: { x: gk, y: gk, z: gk }, geometry: ghostSign }));
+    // The arena's steel doors, shut, each leaf a node of its own.
+    const steel = AM.steelDoor();
+    for (const d of haunt.doors) {
+      const node = createNode({ position: { x: d.x, y: d.y, z: d.z }, rotation: { x: 0, y: d.turn, z: 0 }, geometry: steel.frame });
+      addChild(node, createNode({ geometry: steel.left }), createNode({ geometry: steel.right }));
+      addChild(root, node);
+    }
+    // The gargoyles on the arena's wall top, over the hallway's mouth and every other bay, looking down into it, a
+    // white letter on each one's chest.
+    for (const g of haunt.perches) {
+      const node = createNode({ position: { x: g.x, y: g.y, z: g.z }, rotation: { x: 0, y: g.turn, z: 0 }, scale: { x: GARGOYLE_SCALE, y: GARGOYLE_SCALE, z: GARGOYLE_SCALE }, geometry: AM.gargoyle() });
+      if (g.letter) addChild(node, createNode({ geometry: AM.gargoyleLetter(g.letter) }));
+      addChild(root, node);
+      // A green laser from each eye, unlit until the herald launches (`shineLasers`), each placed at its eye's front.
+      const c = Math.cos(g.turn), sn = Math.sin(g.turn);
+      for (const [ex, ey, ez] of AM.GARGOYLE_EYES) {
+        const x = ex * GARGOYLE_SCALE, z = ez * GARGOYLE_SCALE;
+        const laser = createNode({ geometry: AM.gargoyleLaser(), visible: false, position: { x: g.x + x * c + z * sn, y: g.y + ey * GARGOYLE_SCALE, z: g.z - x * sn + z * c } });
+        addChild(root, laser);
+        lasers.push(laser);
+      }
+    }
+    // The ghost hunt's totems, the hub's four with their name boards, their eyes burning and runes, faces and bands
+    // lit as a fresh merge lights the hub's, always (no feed behind them), each holding its elixir out over the arena
+    // (the hunt hangs it); and the iron fence that rises across the hallway's mouth while a hunt runs.
+    totemsAt = haunt.totems;
+    totemLife = totemsAt.map((t, i) => {
+      const M = BL.totemModels, L = M.layout(i), node = createNode({ position: { x: t.x, y: t.y, z: t.z }, rotation: { x: 0, y: t.turn, z: 0 }, geometry: M.body(i) });
+      addChild(root, node);
+      const slices = BL.totemGlow.bands(M.glyphs(i), TOTEM_SLICE);
+      let lo = Infinity, hi = -Infinity;
+      for (const { y } of slices) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      for (const [, y] of L.eyes) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      const u = (y) => (y - lo) / (hi - lo), runes = slices.map(({ geometry, y }) => ({ node: createNode({ geometry }), u: u(y) }));
+      const features = createNode({ geometry: M.featureHighlights(i) }), rings = [];
+      L.rings.forEach((y, level) => {
+        for (let k = 0; k < M.RING_SEGMENTS; k++) {
+          rings.push({ node: createNode({ geometry: M.ringSector(i), position: { x: 0, y, z: 0 }, rotation: { x: 0, y: -k / M.RING_SEGMENTS * Math.PI * 2, z: 0 }, visible: false }),
+            a: ((k - M.RING_SEGMENTS / 4 + M.RING_SEGMENTS) % M.RING_SEGMENTS + 0.5) / M.RING_SEGMENTS, level });
+        }
+      });
+      const flames = L.eyes.map(([x, y, z, size]) => ({ node: createNode({ position: { x, y, z }, scale: { x: size, y: size, z: size }, geometry: AM.blaze() }), size, u: u(y) }));
+      for (const part of [...runes, ...rings, ...flames]) addChild(node, part.node);
+      addChild(node, features);
+      return { runes, features, rings, flames, pattern: BL.totemGlow.pattern(BL.totemFeed.REPOS[i].word) };
+    });
+    fence = createNode({ position: { x: FENCE_X, y: HAUNT.y - AM.IRON_FENCE.h, z: (HAUNT.z0 + HAUNT.z1) / 2 }, rotation: { x: 0, y: Math.PI / 2, z: 0 }, geometry: AM.ironFence(), visible: false });
+    addChild(root, fence);
+    fenceK = 0;
     // The fires, and the ceiling with the mammoth hung under it: each flame its own node on the one flame geometry,
     // so each flickers on its own clock; the tikis and fire bowls standing on a floor or the deck stand in the way.
     const lamps = AM.lanterns(), lampGlass = createNode({ geometry: lamps.glass, sightHidden: true });
@@ -222,7 +308,7 @@
     for (const [x, z] of AM.MEZZ_POSTS) square(x, z, 0.24);
     // The back row of columns' faces, which the door and the dart boards on the back wall between them are flush with.
     const columnFace = Math.min(...AM.MEZZ_POSTS.map(([, z]) => z)) + 0.24;
-    for (const [w, back] of ROOTS) blocks.push([STAGE.x - w, STAGE.x + w, STAGE.z - back, STAGE.z + ROOTS_FRONT, ...ROOT_FEET]);
+    // The low decorative roots are step-over dressing; only the cabinets block the stage's approaches.
     const picks = dressing().picks;
     for (let i = 0; i < picks.length; i += 6) if (STANDING.has(picks[i])) square(picks[i + 2], picks[i + 4], picks[i + 5] + 0.06, picks[i + 3] > MEZZ.y - 0.5 ? DECK_FEET : FLOOR_FEET);
     for (const [x, y, z, , , reach] of LAYOUT.stores) square(x, z, reach + 0.06, y ? DECK_FEET : FLOOR_FEET);
@@ -265,79 +351,92 @@
       addChild(screen, best);
       screens.push({ node: screen, best, frames, start: on ? AM.attractStart(c.game) : AM.retroStart(c.retro) });
       addChild(node, body, signNode(named.title, named.icon, MQ.w, 0, MQ.y, MQ.z), screen);
+      if (c.service) {
+        const bay = createNode({ geometry: AM.rallyRepairBay() });
+        const panel = createNode({ geometry: AM.cabinetPanel(c.index), position: { x: -1.08, y: 0.1, z: 0.28 }, rotation: { x: -0.22, y: -0.4, z: -0.12 } });
+        const clanker = BL.agent.create({ groundAt: () => 0, form: "ape", x: -0.32, z: 1.3, heading: Math.PI - 0.35, scale: 0.65 });
+        addChild(clanker.parts.head, createNode({ geometry: AM.staffHat(2) }));
+        addChild(clanker.parts.torso, createNode({ geometry: AM.staffVest(2) }));
+        clanker.chest.rotation.x = 1.35;
+        clanker.parts.head.rotation.x = -0.4;
+        clanker.parts.armR.rotation.x = -2.65;
+        clanker.parts.armL.rotation.x = -2.7;
+        // The handle sits in the right palm; its tip reaches into the bay as the wrist turns.
+        const driver = createNode({ geometry: AM.repairDriver(), position: { x: 0.04, y: -0.84, z: 0.48 },
+          rotation: { x: 2.6, y: 0, z: 0 }, scale: { x: 1.54, y: 1.54, z: 1.54 } });
+        addChild(clanker.parts.armR, driver);
+        addChild(node, bay, panel, clanker.root);
+        repair = { clanker, driver, cabinet: c };
+        // The detached panel and worker occupy only this service bay; keep the aisle and fire approach clear.
+        blocks.push(blockOf(c, -1.7, 0.65, -0.15, 1.78, DECK_FEET));
+        target(clanker.root, { kind: "repair" }, 0.7);
+      }
       addChild(root, node);
       wave(body, c.x, c.z); wave(screen, c.x, c.z);
       target(body, on ? { kind: "cabinet", game: c.game } : { kind: "retro", retro: c.retro }, 1.3);
-      blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, on ? FLOOR_FEET : DECK_FEET));
-      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, label: named.name } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
+      blocks.push(blockOf(c, -CAB.w / 2, CAB.w / 2, -CAB.d / 2, CAB.d / 2, c.y === MEZZ.y ? DECK_FEET : FLOOR_FEET));
+      stations.push(on ? { kind: "cabinet", game: c.game, play: c.play, y: c.y, label: named.name + (named.unavailable ? " · out of order" : "") } : { kind: "retro", retro: c.retro, id: named.id, play: c.play, y: c.y, label: named.name });
     }
     // Every game in the hall: each machine in its frame with its game over nodes under it, and a station in front of
-    // it that opens that game at that machine. Oogas from the roster play some of them for real (`bot`), and when
-    // the visitor takes one over they step aside for as long as the game lasts.
+    // it that opens that game at that machine.
     carnival = [];
     bots = [];
     life = [];
-    const machine = (p, parts, make, kind, box, index, bot, slot) => {
+    const machine = (p, parts, make, kind, box, index) => {
       // A machine whose geometry stands off its player's spot sits on a child node `dz` along, `dy` up, turned by `turn`.
       const node = framed(p), body = createNode({ geometry: parts.body }), glow = createNode({ geometry: parts.glow, sightHidden: true });
       const holder = parts.dz || parts.dy || parts.turn ? createNode({ position: { x: 0, y: parts.dy || 0, z: parts.dz || 0 }, rotation: { x: 0, y: parts.turn || 0, z: 0 } }) : node;
       addChild(holder, body, glow);
       if (parts.glass) addChild(holder, createNode({ geometry: parts.glass, sightHidden: true }));
       if (parts.lamp) addChild(holder, createNode({ geometry: parts.lamp }));
+      if (parts.scale) holder.scale.x = holder.scale.z = parts.scale;
       if (holder !== node) addChild(node, holder);
       if (parts.oche) addChild(node, createNode({ geometry: AM.dartOche() }));
       addChild(root, node);
       const mid = box ? (box[2] + box[3]) / 2 : (parts.dz || 0), at = toHall(p, 0, mid, {});
-      const b = bot ? { p, at, cool: 2 + bots.length * 1.5, wait: 0, spool: -1, strip: null, member: null, aim: { x: 0 } } : null;
       wave(glow, at.x, at.z);
-      const s = liven(kind, glow, body, at, p.play, b);
+      const s = liven(kind, glow, body, at, p.play, null);
       s.node = node;
       const host = {
         node, glow, index,
-        get best() { return game.state.arcade[kind]; },
-        onEnd: () => { if (b) botDone(b); },
+        get best() { return machineBest(kind, p.scoreId); },
+        onEnd: () => {},
         burst: (lx, ly, lz, count) => { const w = toHall(p, lx, lz, BURST_AT); fx.burst(w.x, ly, w.z, count, SPARKS, 2.4); },
         cue: (name) => hear(at.x, at.z, name, 0.8),
-        aim: b ? b.aim : { x: 0 },
-        // An Ooga's big moment at the machine: it flashes and the Oogas round it cheer.
-        crack: b ? (lx, ly, lz, big) => { if (big) cheerAround(s); } : undefined
+        aim: { x: 0 }
       };
       const g = make(host);
       s.g = g;
       carnival.push(g);
       if (box) blocks.push(blockOf(p, ...box));
-      if (b) {
-        b.g = g;
-        // Its tickets spool out of the slot at `slot` in the machine's frame.
-        if (slot) {
-          b.strip = createNode({ position: { x: slot[0], y: slot[1], z: slot[2] }, geometry: AM.ticketStrip(), scale: { x: 1, y: 0.01, z: 1 }, visible: false, sightHidden: true });
-          addChild(node, b.strip);
-        }
-        bots.push(b);
-      }
-      const station = { kind: "machine", game: g, index, bot: !!b, play: p.play, turn: p.turn, label: g.name };
+      const station = { kind: "machine", game: g, index, bot: false, play: p.play, turn: p.turn, label: `${g.name} · Machine ${p.scoreId.slice(p.scoreId.lastIndexOf("-") + 1)}` };
       stations.push(station);
       s.station = station;
       target(body, { kind: "machine", station }, 2.2);
       return station;
     };
     const F = LAYOUT.frames;
-    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
-    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
-    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
+    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i));
+    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i));
+    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0);
     // The claws' blocks reach half-way to the posts either side of their bays, so the narrow gaps between the booths,
-    // their scoreboards and the posts are closed rather than squeezed into. The air hockey table's scoreboards stand on
-    // posts beyond its far end, wider than the table, and the pool tables' behind theirs: a block of their own.
-    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
-    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, BL.arcadeGames.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
-    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
-    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i, false));
+    // their scoreboards and the posts are closed rather than squeezed into. Pool scoreboards keep their own blocks;
+    // hockey scores float above players, leaving its former far-end board posts clear.
+    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i));
+    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i); });
+    F.hockey.forEach((p, i) => {
+      const a = AM.airHockey(), station = machine(p, { body: a.body, glow: a.lit, dz: -AM.HOCKEY.w * AM.HOCKEY.scale / 2 - 0.65, turn: Math.PI / 2, scale: AM.HOCKEY.scale }, BL.arcadeGames.airHockey, "hockey", [-0.65 * AM.HOCKEY.scale, 0.65 * AM.HOCKEY.scale, -0.65 - (AM.HOCKEY.w + 0.1) * AM.HOCKEY.scale, -0.65 + 0.1 * AM.HOCKEY.scale], i);
+      // Both ends open the same physical table and the same two-seat session.
+      const far = BL.hockeyWire.seat(i, 1, 0, {});
+      stations.push({ ...station, play: { x: far.x, z: far.z, facing: far.yaw } });
+    });
+    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
+    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the
     // rock to the columns' faces, so nobody walks into it and a walker sliding along the columns catches on none.
     const boardBox = boundsOf(AM.dartBoard());
     for (const p of F.darts) blocks.push([p.x + boardBox.min[0], p.x + boardBox.max[0], HALL.back, columnFace, ...FLOOR_FEET]);
-    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
+    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i));
     // The doorway's token changer and ticket muncher (each in the way as far as it stands, the muncher shallower),
     // and the prize queue's ropes.
     LAYOUT.changers.forEach((p, i) => {
@@ -418,54 +517,18 @@
     for (let i = 0; i < MOTES; i++) { const n = createNode({ geometry: AM.spark(0), scale: { x: 0.5, y: 0.5, z: 0.5 }, sightHidden: true }); addChild(root, n); motes.push({ node: n, a: 0.2 + (i * 0.37) % 0.4, b: 0.15 + (i * 0.53) % 0.3, p: i * 2.39 }); }
   };
   const MOTES = 36;
-  // The Oogas at play: the roster's own, never the visitor, in turn round the spots.
-  const seatCrowd = (playerName) => {
-    crowd = [];
-    walkers = [];
-    const names = contributors.activeRoster.map((c) => c.name).filter((n) => n !== playerName);
-    if (!names.length) return;
-    CROWD.forEach(([x, z, facing, pose], i) => {
-      const cave = models.caveman(contributors.traitsFor(names[i % names.length])), feet = supportAt(x, z, 1);
-      if (cave.parts.gun) cave.parts.gun.visible = false;
-      const base = pose === "sit" ? SEAT_Y : cave.root.position.y + feet;
-      Object.assign(cave.root.position, { x, y: base, z });
-      cave.root.rotation.y = facing;
-      if (pose === "sit") cave.parts.legR.rotation.x = cave.parts.legL.rotation.x = -1.45;
-      addChild(root, cave.root);
-      crowd.push({ cave, pose, facing, t: i * 1.37, x, z, y: base, wave: 0, greet: 0, swing: 0, cheer: 0 });
-      // Each is in the way as far as its hanging arms reach, a sitter by its stool's side of the table.
-      square(x, z, pose === "sit" ? 0.45 : CROWD_REACH, [feet - 1, feet + 2]);
-    });
-    // Each played machine's Ooga, so it swings when the game takes its shot and cheers at the end.
-    for (const b of bots) b.member = crowd.find((m) => Math.hypot(m.x - b.p.x, m.z - b.p.z) < 0.1) || null;
-    // Walkers: a few more Oogas strolling a loop round the stage, stopping to watch the claws and the lanes.
-    for (let i = 0; i < WALKERS; i++) {
-      const cave = models.caveman(contributors.traitsFor(names[(CROWD.length + i) % names.length]));
-      if (cave.parts.gun) cave.parts.gun.visible = false;
-      addChild(root, cave.root);
-      walkers.push({ cave, s: i * LOOP_LEN / WALKERS, dir: i % 2 ? -1 : 1, pause: 0, leg: i, base: cave.root.position.y, x: 0, z: 0, wave: 0, greet: 0, cheer: 0 });
+  // Actual records, never invented NPC scores: M1/M2 identify the winning machine, LOC an offline local best.
+  const FAME_GAMES = [["THRO", "skee"], ["HOOP", "hoops"], ["TOSS", "shy"], ["CLAW", "claw"]];
+  const fameRows = () => FAME_GAMES.map(([label, kind]) => {
+    let who = "-", best = 0;
+    for (const id of BL.highscoreRules.games[kind].machines) {
+      const shared = BL.highscores.best(kind, id), score = shared ?? game.arcadeBest(id);
+      if (score > best) { best = score; who = shared === null ? "LOC" : `M${id.slice(id.lastIndexOf("-") + 1)}`; }
     }
-  };
-  // The walkers' loop, clear of everything on the floor, and where they stop: [x, z, seconds].
-  const LOOP = [[-1.4, 3.2, 0], [-2.8, -1.4, 0], [-7, -3.4, 0], [-7.6, -9.4, 2.5], [-4.6, -13.9, 0], [-2.2, -16.6, 3], [2.2, -16.6, 0], [4.6, -13.9, 0], [7.2, -10.4, 2.5], [7.3, -4.4, 0], [3, -2.6, 0], [1.4, 3.2, 0]];
-  const LOOP_AT = [0];
-  for (let i = 1; i <= LOOP.length; i++) { const a = LOOP[i - 1], b = LOOP[i % LOOP.length]; LOOP_AT.push(LOOP_AT[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
-  const LOOP_LEN = LOOP_AT[LOOP.length], WALKERS = 3, WALK_SPEED = 1.05;
-  // The hall of fame: each game's best as the roster would have it (a score hashed from each Ooga's name, so it is
-  // the same every visit), beaten by the visitor's own best where theirs is higher, under their Ooga's initials.
-  const FAME_GAMES = [["THRO", "skee", 120, 420, 10], ["HOOP", "hoops", 18, 70, 1], ["TOSS", "shy", 5, 20, 1], ["CLAW", "claw", 25, 110, 5]];
-  const initials = (name) => (name.toUpperCase().replace(/[^A-Z0-9]/g, "") + "OOG").slice(0, 3);
-  const hangFame = (playerName) => {
-    const names = contributors.activeRoster.map((c) => c.name).filter((n) => n !== playerName), rows = [];
-    for (const [label, kind, lo, hi, step] of FAME_GAMES) {
-      let who = "OOG", best = 0;
-      for (const n of names) {
-        const v = Math.round((lo + (math.fnv1a(n + kind) % 1000) / 1000 * (hi - lo)) / step) * step;
-        if (v > best) { best = v; who = initials(n); }
-      }
-      const mine = game.state.arcade[kind];
-      rows.push(playerName && mine >= best && mine > 0 ? [label, initials(playerName), mine, true] : [label, who, best, false]);
-    }
+    return [label, who, best, false];
+  });
+  const hangFame = () => {
+    const rows = fameRows();
     const F = LAYOUT.fame, frame = AM.fameFrame();
     fame = createNode({ position: { x: F.x, y: F.y, z: F.z }, rotation: { x: 0, y: F.turn, z: 0 } });
     addChild(fame, createNode({ geometry: frame.frame }), createNode({ geometry: frame.bulbs, sightHidden: true }), createNode({ position: { x: 0, y: 0, z: 0.01 }, geometry: AM.fameBoard(rows), sightHidden: true }));
@@ -502,7 +565,6 @@
     renderPrizes();
     prizeUi.panel.hidden = false;
     pilot.setActive(false);
-    staff.clerk.poke();
   };
   const closePrizes = () => {
     if (prizeUi.panel.hidden) return;
@@ -520,12 +582,10 @@
     hud.toast(`${prize.name}! Yours now. Ooga proud!`);
     const w = toHall(LAYOUT.prizes, 0, 0, {});
     fx.burst(w.x, 2.2, w.z, 36, SPARKS, 2.6);
-    staff.clerk.poke();
     hear(w.x, w.z, "bell");
     showShelf();
   };
   const order = () => {
-    staff.vendor.poke();
     hud.toast(ORDERS[orders++ % ORDERS.length]);
     const w = toHall(LAYOUT.snack, 0, 0, {});
     hear(w.x, w.z, "crunch");
@@ -542,8 +602,6 @@
   // spot is where the whole wheel shows over the cabinets' crowns). One spin at a time; a visitor who leaves while
   // one turns hears of its win on the way back in, with the room's welcome for more tickets (`leave`, `enter`).
   const WHEEL_TURNS = 3;
-  const WHEEL_SORRY = ["Aww. Wheel stingy. Spin again?", "Small tickets. Big one next time!", "Wheel tease you. Ooga try again!"];
-  let sorry = 0;
   const shownTickets = () => game.state.arcade.tickets - (spin.t >= 0 ? spin.value : 0);
   const spinWheel = () => {
     if (spin.t >= 0) return;
@@ -566,7 +624,6 @@
     }
     hear(p.x, p.z, "coin");
     hear(W.x, W.z, "swish", 1.2);
-    crewSays(staff[0], "Round and round! Where stop?");
   };
   // Where it stopped: its tickets (saved at the draw) on the boards, the toast, and a party as big as the win. The
   // pods flash for any; at or over the cost the room lights up, embers fly from the wheel and the room cheers with the
@@ -580,11 +637,10 @@
     hud.toast(`BIG SPIN: +${v} ticket${v === 1 ? "" : "s"}!${jackpot ? " JACKPOT!" : ""}`);
     hear(W.x, W.z, "spit", 1.2);
     spin.flash = jackpot ? 6 : big ? 3 : 1.5;
-    if (!big) return hostSays(WHEEL_SORRY[sorry++ % WHEEL_SORRY.length], false);
+    if (!big) return;
     spin.party = spin.flash;
     fx.burst(W.x, W.y, W.z + 0.4, jackpot ? 70 : 30, SPARKS, jackpot ? 3.2 : 2.4);
     roomCheers();
-    hostSays(jackpot ? "JACKPOT! Ooga rich!" : "Big spin! Good win, Ooga!", true);
     if (jackpot) hear(W.x, W.z + 3, "ooga", 1.2);
   };
 
@@ -601,13 +657,7 @@
   };
   // The hall's chatter between the events, every second or so from somewhere: a machine at work, or an Ooga at the
   // tables, the snack bar or the shy grunting, laughing or cheering.
-  const AMBIENT = [
-    ...LAYOUT.changers.map((p) => [p.x, p.z, "coin", 0.6]), ...LAYOUT.hockeys.map((h) => [h.x, h.z, "clack", 0.7]), ...LAYOUT.pools.map((p) => [p.x, p.z, "clack", 0.5]),
-    ...LAYOUT.pinball.map(([x, z]) => [x, z, "flip", 0.7]), ...AM.CABINETS.filter((c) => c.game >= 0).map((c) => [c.x, c.z, "ding", 0.5]),
-    [LAYOUT.tables[0][0], LAYOUT.tables[0][1], "cheer", 0.35], [LAYOUT.claws[0][0], LAYOUT.claws[0][1], "whirr", 0.6],
-    [LAYOUT.tables[1][0], LAYOUT.tables[1][1], "laugh", 0.5], [LAYOUT.tables[0][0], LAYOUT.tables[0][1], "grunt", 0.5],
-    [LAYOUT.snack.x, LAYOUT.snack.z, "grunt", 0.45], [LAYOUT.shy.x, LAYOUT.shy.z, "laugh", 0.4]
-  ];
+  const AMBIENT = BL.arcadeAmbience.sources;
   const ambience = (dt) => {
     ambientT -= dt;
     if (ambientT > 0) return;
@@ -616,85 +666,6 @@
     hear(x, z, name, loud);
   };
 
-  // ---- the Oogas who play for real ------------------------------------------------------------------------
-  // A played machine's Ooga starts a game, then takes each shot when the game offers it: skee-ball's aim at once
-  // and its roll with the meter near the green, a hoop shot with the meter near the green, so it scores like a good
-  // player with the odd miss. At the end its tickets spool out, it cheers, and after a breather it plays again.
-  const playBots = (dt) => {
-    for (let i = 0; i < bots.length; i++) {
-      const b = bots[i], g = b.g, st = g.status;
-      if (b.spool >= 0) {
-        b.spool += dt;
-        if (b.strip) b.strip.scale.y = Math.min(0.9, b.spool * 0.7) + 0.01;
-        if (b.spool > 4.5) { b.spool = -1; if (b.strip) b.strip.visible = false; }
-      }
-      if (!g.playing) {
-        b.cool -= dt;
-        if (b.cool <= 0) { g.attract(0, 0); g.start(); b.wait = 0.8; hear(b.at.x, b.at.z, "coin", 0.7); }
-        continue;
-      }
-      if (g.kind === "hockey") b.aim.x = Math.max(-1, Math.min(1, g.puckU * 1.1));
-      b.wait -= dt;
-      if (b.wait > 0 || !st.verb) continue;
-      const slop = 0.06, inWindow = st.meter >= st.window0 - slop && st.meter <= st.window1 + slop;
-      if (st.meter >= 0 && !inWindow) continue;
-      g.act();
-      b.wait = 0.5 + Math.random() * 0.9;
-      if (b.member) b.member.swing = 1;
-    }
-  };
-  const botDone = (b) => {
-    b.cool = 5;
-    b.spool = 0;
-    if (b.strip) { b.strip.visible = true; b.strip.scale.y = 0.01; }
-    hear(b.at.x, b.at.z, "spit", 0.9);
-    if (b.member) b.member.wave = 2;
-  };
-
-  // ---- the walkers, greetings and cheers ---------------------------------------------------------------------
-  const walk = (dt, elapsed) => {
-    for (let i = 0; i < walkers.length; i++) {
-      const w = walkers[i], P = w.cave.parts, r = w.cave.root;
-      if (w.pause > 0) w.pause -= dt;
-      else {
-        const before = w.s;
-        w.s = (w.s + w.dir * WALK_SPEED * dt + LOOP_LEN) % LOOP_LEN;
-        // A stop at a waypoint it just passed.
-        for (let k = 0; k < LOOP.length; k++) if (LOOP[k][2] && ((w.dir > 0 && before < LOOP_AT[k] && w.s >= LOOP_AT[k]) || (w.dir < 0 && before > LOOP_AT[k] && w.s <= LOOP_AT[k]))) w.pause = LOOP[k][2];
-      }
-      let k = 0;
-      while (k < LOOP.length - 1 && LOOP_AT[k + 1] <= w.s) k++;
-      const a = LOOP[k], b = LOOP[(k + 1) % LOOP.length], t = (w.s - LOOP_AT[k]) / (LOOP_AT[k + 1] - LOOP_AT[k]);
-      w.x = a[0] + (b[0] - a[0]) * t; w.z = a[1] + (b[1] - a[1]) * t;
-      r.position.x = w.x; r.position.z = w.z; r.position.y = w.base;
-      const moving = w.pause <= 0, stride = moving ? Math.sin(elapsed * 7 + w.leg) * 0.55 : 0;
-      r.rotation.y = Math.atan2((b[0] - a[0]) * w.dir, (b[1] - a[1]) * w.dir);
-      P.legR.rotation.x = stride; P.legL.rotation.x = -stride;
-      P.armR.rotation.x = -stride * 0.6;
-      P.armL.rotation.x = w.wave > 0 || w.cheer > 0 || cheerT > 0 ? -2.6 + Math.sin(elapsed * 12) * 0.3 : stride * 0.6;
-      w.wave = Math.max(0, w.wave - dt);
-      w.cheer = Math.max(0, w.cheer - dt);
-    }
-  };
-  // Any Ooga the visitor walks up to waves and says hello, once in a while; every Ooga cheers when the room does.
-  const HELLOS = ["Ooga!", "Ooga booga!", "Claw sneaky. You try!", "Me beat your score!", "Coconut go bonk!", "Fire warm. Games fun.", "Ooga ooga!", "Me want crown prize!", "Hoo hoo! Welcome!", "Spin wheel! Maybe jackpot!"];
-  let hello = 0;
-  // Ooga m at (x, y, z), dt on, with the visitor at p.
-  const hail = (m, x, y, z, p, dt) => {
-    m.greet = Math.max(0, m.greet - dt);
-    if (m.greet > 0 || Math.abs(x - p.x) > 2.2 || Math.abs(z - p.z) > 2.2 || Math.hypot(x - p.x, z - p.z) > 2.2) return;
-    m.greet = 14;
-    m.wave = 1.6;
-    fx.sayAt(x, y + 2.2, z, HELLOS[hello++ % HELLOS.length], 1.8);
-    hear(x, z, "grunt", 0.7);
-  };
-  const greet = (dt) => {
-    cheerT = Math.max(0, cheerT - dt);
-    if (!avatar) return;
-    const p = avatar.root.position;
-    for (let i = 0; i < crowd.length; i++) { const m = crowd[i]; hail(m, m.x, m.y, m.z, p, dt); }
-    for (let i = 0; i < walkers.length; i++) { const w = walkers[i]; hail(w, w.x, 0, w.z, p, dt); }
-  };
   const roomCheers = () => {
     cheerT = 3;
     const W = LAYOUT.wheel;
@@ -721,7 +692,7 @@
     lit.lanterns.glow = (party ? 1.25 : 0.94) + Math.sin(elapsed * 7.3) * 0.05 + Math.sin(elapsed * 13.1) * 0.03;
     // Each flame licks up and settles on its own clock, brighter and taller while the room celebrates.
     for (let i = 0; i < lit.flames.length; i++) {
-      const f = lit.flames[i], k = Math.sin(elapsed * 11 + i * 2.3) * 0.07 + Math.sin(elapsed * 17.3 + i * 1.1) * 0.05 + (party ? 0.15 : 0);
+      const f = lit.flames[i], k = BL.blaze.flare(elapsed, i * 2.3) + (party ? 0.15 : 0);
       f.node.scale.y = f.size * (1 + k);
       f.node.scale.x = f.node.scale.z = f.size * (1 - k * 0.4);
       f.node.glow = 1 + k * 1.5;
@@ -743,13 +714,8 @@
   // time in a while it plays its showpiece and a short call and the nearest Ooga or gorilla calls them over. A big
   // moment at a machine an Ooga plays (its game's `crack`) flashes it and the Oogas round it cheer; coming back from a
   // machine with more tickets flashes that one. Allocation-free.
-  const INVITE = 2.2, CALL_GAP = 7, COOL = 20, CHEER_R = 6;
-  const CALLS = {
-    skee: "Thro-ball! Roll coconut up!", hoops: "Hoop! Coconut in basket!", shy: "Coconut Toss! Bonk them off!", claw: "Claw sneaky. Grab idol!",
-    pinball: "Pinball! Flip coconut!", hockey: "Air hockey! Beat Ooga!", billiards: "Pool! Sink coconuts!", darts: "Darts! Hit bull, Ooga!",
-    ride: "Ride beast! Bump to drum!", snack: "Hungry? Snack bar!", prizes: "Tickets buy prizes!"
-  };
-  let life = null, invited = null, callT = 0;
+  const INVITE = 2.2, COOL = 20;
+  let life = null, invited = null;
   // One of them: its kind, game (none for the counters, totem and muncher), lit node, body and frame, the Ooga playing
   // it if any, its middle and play spot, its place in its row, and the running numbers.
   const liven = (kind, glow, body, at, play, bot) => {
@@ -759,34 +725,7 @@
     life.push(s);
     return s;
   };
-  // A big moment at s: it flashes, and the Oogas within `CHEER_R` m (not the one playing it) cheer, a few seconds apart.
-  const cheerAround = (s) => {
-    s.flash = Math.max(s.flash, 1.2);
-    if (s.cheer > 0) return;
-    s.cheer = 4;
-    const who = s.bot.member;
-    for (let i = 0; i < crowd.length; i++) { const m = crowd[i]; if (m !== who && Math.abs(m.x - s.x) + Math.abs(m.z - s.z) < CHEER_R) m.cheer = 2; }
-    for (let i = 0; i < walkers.length; i++) { const w = walkers[i]; if (Math.abs(w.x - s.x) + Math.abs(w.z - s.z) < CHEER_R) w.cheer = 2; }
-    hear(s.x, s.z, "cheer", 0.5);
-  };
-  // The nearest Ooga at play or strolling (not one who has just said hello) or gorilla on the floor not already
-  // speaking, within 8 m of s's play spot, calls the visitor over, and that counts as its hello. True if one did.
-  const callOver = (s) => {
-    let best = 64, m = null, g = null;
-    for (let i = 0; i < crowd.length + walkers.length; i++) {
-      const o = i < crowd.length ? crowd[i] : walkers[i - crowd.length], d = (o.x - s.px) * (o.x - s.px) + (o.z - s.pz) * (o.z - s.pz);
-      if (d < best && o.greet < 11) { best = d; m = o; }
-    }
-    if (crewSay <= 0) for (let i = 0; i < staff.length; i++) {
-      const o = staff[i], q = o.agent.root.position, d = (q.x - s.px) * (q.x - s.px) + (q.z - s.pz) * (q.z - s.pz);
-      if (!o.deck && d < best) { best = d; g = o; }
-    }
-    if (g) { crewSays(g, CALLS[s.kind]); g.greetCool = Math.max(g.greetCool, 30); }
-    else if (m) { m.wave = 1.6; m.greet = 14; fx.sayAt(m.x, (m.pose ? m.y : 0) + 2.2, m.z, CALLS[s.kind], 2); }
-    return g !== null || m !== null;
-  };
   const stationLife = (dt, elapsed) => {
-    callT = Math.max(0, callT - dt);
     const q = avatar && !leaving && feetOf() < 1 ? avatar.root.position : null, near = q ? nearStation(q.x, q.z, INVITE) : null;
     let now = null;
     for (let i = 0; i < life.length; i++) {
@@ -800,8 +739,8 @@
         if (playing) s.k = 0;
         else {
           s.k = Math.min(1, s.k + dt * 0.8);
-          g.attract(dt, s.k);
-          if ((s.next -= dt) <= 0) { s.next = 8 + Math.random() * 10; g.tease(); if (s.bot) s.bot.cool = Math.max(s.bot.cool, 2); }
+          if (!g.following) g.attract(dt, s.k);
+          if (!g.following && (s.next -= dt) <= 0) { s.next = 8 + Math.random() * 10; g.tease(); if (s.bot) s.bot.cool = Math.max(s.bot.cool, 2); }
         }
       } else if ((s.next -= dt) <= 0) { s.next = 4 + Math.random() * 5; s.flash = Math.max(s.flash, 0.3); }
       if (powerT < 4) continue;
@@ -829,37 +768,29 @@
         now.cool = COOL;
         if (now.g !== null && !now.g.playing) { now.g.tease(); now.next = Math.max(now.next, 8); if (now.bot) now.bot.cool = Math.max(now.bot.cool, 2); }
         hear(now.px, now.pz, "star0", 0.6);
-        if (callT <= 0 && callOver(now)) callT = CALL_GAP;
+
       }
     }
   };
 
-  // The arcade plays like Ooga Mine: the Ooga walks empty-handed with the camera behind, so the weapon keys do
-  // nothing here and a right-click never aims. Registered before the pilot's listeners, in the capture phase.
-  const WEAPON_KEYS = new Set(["1", "2", "r"]);
-  const armsKeys = (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase())) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  };
-  const rightClick = (e) => {
-    if (e.button !== 2) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  };
-  let canvasEl = null;
   const toggleMute = () => { const off = audio.setMuted(!audio.muted); hud.toast(off ? "Sound off" : "Sound on"); };
   const onKey = (e) => {
-    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
-    if (e.key === "m" || e.key === "M") {
-      toggleMute();
-      return true;
+    if (leaving && !openingGame && e.key === "Escape") { openingRequest++; leaving = false; BL.net.leaveCabinet(); return true; }
+    if (ghosts && ghosts.key(e)) return true; // HALLOWEEN
+    // X keeps mouse-look available; ownership gates weapon actions outside the arena. 1 and 2
+    // pick the club or the rifle, G swaps, V fires. Outside a hunt they meet nothing but the herald.
+    if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (BL.controls.matches(e, "view") && pilot.modeAction("mode-toggle")) return true;
+      if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return true;
+      if (BL.controls.matches(e, "swapWeapon")) { pilot.weaponAction("weapon-toggle"); return true; }
+      if (BL.controls.matches(e, "attack")) { pilot.weaponAction("weapon-fire"); return true; }
     }
-    if (e.key === "Escape" && !prizeUi.panel.hidden) {
+    if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
+    if (BL.controls.matches(e, "escape") && !prizeUi.panel.hidden) {
       closePrizes();
       return true;
     }
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (!pilot.escape()) leaveCave();
       return true;
     }
@@ -908,11 +839,91 @@
   };
   // The shared slots go to the fires nearest the view, nearest first, by repeated minimum: no sort, no list. Each
   // flickers, its light's strength wavering on its own clock.
+  // In the haunted hallway and the arena the hall's lamps light nothing in sight, so the fires take every slot, and
+  // in the arena the ghost's pale green glow the first; the arena's night over it all: stars over a dark blue fading
+  // to black, a cold moonlight for the hall's warm fill, a thin blue haze far off, and the view reaching across it.
+  // The hall's lamps and look are put back as the view leaves.
+  const NIGHT = { stars: 1, sun: [0, 0, 0], sunDirection: { x: 0, y: -1, z: 0 }, direct: [0.35, 0.42, 0.62], fog: [0.02, 0.025, 0.05], fogNear: 45, fogFar: 140 };
+  // Its sky and fill, copied each frame into the colours the hunt's night darkens in place (`ghosts.shade`).
+  const NIGHT_TONES = { horizon: [0.05, 0.06, 0.12], zenith: [0.005, 0.008, 0.025], sky: [0.2, 0.24, 0.38], ground: [0.06, 0.06, 0.08], clear: [0.01, 0.012, 0.025] };
+  const TONES = {};
+  for (const key in NIGHT_TONES) TONES[key] = NIGHT_TONES[key].slice();
+  const CAVE = { directStrength: RENDER_OPTS.directStrength, ambientFloor: RENDER_OPTS.ambientFloor };
+  for (const key in NIGHT) CAVE[key] = RENDER_OPTS[key];
+  for (const key in NIGHT_TONES) CAVE[key] = RENDER_OPTS[key];
+  // The herald over the arena's middle (its foot `HERALD_FLOAT` up, bobbing) and its pale green glow.
+  const GHOST_GLOW = [14, 0.5, 1, 0.72], HERALD_HEIGHT = 2.6, HERALD_FLOAT = 1.1;
+  const GARGOYLE_SCALE = 6.4, TOTEM_SLICE = 0.3;
+  // As the herald launches the gargoyles' eyes shine green lasers down onto it, held on it as it shoots up the beam and
+  // thinning out with it (the hunt's `launch`); each rod flickers on its own.
+  const shineLasers = (elapsed) => {
+    const L = ghosts ? ghosts.launch : null, k = L ? L.k : 0, on = k > 0.02;
+    for (let i = 0; i < lasers.length; i++) {
+      const n = lasers[i];
+      n.visible = on;
+      if (!on) continue;
+      const dx = L.x - n.position.x, dy = L.y - n.position.y, dz = L.z - n.position.z, d = Math.hypot(dx, dy, dz);
+      n.rotation.y = Math.atan2(dx, dz);
+      n.rotation.x = -Math.asin(dy / d);
+      n.scale.z = d;
+      n.scale.x = n.scale.y = k * (0.8 + 0.2 * Math.sin(elapsed * 37 + i * 1.9));
+    }
+  };
+  let hauntLit = false;
+  // The arena's totems, lit always as the hub's are on a merge's day: runes in their pattern up the pole, the painted
+  // faces breathing, a bright front circling each band and the eye fires leaping as the pattern passes them.
+  const lightTotems = (elapsed) => {
+    for (let i = 0; i < totemLife.length; i++) {
+      const o = totemLife[i], t = elapsed + i * 3.1;
+      for (let k = 0; k < o.runes.length; k++) {
+        const r = o.runes[k], lit = 0.25 + 0.75 * o.pattern(r.u, t, i);
+        r.node.glow = 0.45 + 0.55 * lit;
+        r.node.highlight = 0.45 + 1.6 * lit;
+      }
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.2 + i * 1.7), shine = 0.38 * pulse * pulse;
+      o.features.visible = shine > 0.02;
+      o.features.glow = shine;
+      o.features.highlight = 0.55 * shine;
+      for (let k = 0; k < o.rings.length; k++) {
+        const r = o.rings[k], lit = BL.totemGlow.ring(r.a, t, r.level);
+        r.node.visible = lit > 0.01;
+        r.node.glow = lit;
+        r.node.highlight = lit * 2.2;
+      }
+      for (let k = 0; k < o.flames.length; k++) {
+        const f = o.flames[k], flick = Math.sin(elapsed * 11 + k * 2.3 + i) * 0.08 + Math.sin(elapsed * 17.3 + k * 1.1) * 0.05;
+        const fire = 0.75 + 0.75 * o.pattern(f.u, t, i);
+        f.node.scale.x = f.node.scale.z = f.size * fire;
+        f.node.scale.y = f.size * fire * (1 + flick);
+      }
+    }
+  };
   const glowNear = (elapsed) => {
-    const F = AM.lanterns(), P = F.lights, n = P.length / 3, t = pilot.orbit.target, L = RENDER_OPTS.lights;
+    const F = AM.lanterns(), P = F.lights, n = P.length / 3, t = pilot.orbit.target, L = RENDER_OPTS.lights, haunted = inHaunt(t.x, t.z) && t.y > HAUNT.y;
+    if (haunted !== hauntLit) {
+      if (haunted) { for (const key in NIGHT) RENDER_OPTS[key] = NIGHT[key]; for (const key in TONES) RENDER_OPTS[key] = TONES[key]; }
+      else for (const key in CAVE) RENDER_OPTS[key] = CAVE[key];
+      camera.far = haunted ? 130 : 60;
+      if (!haunted) lightUp();
+    }
+    hauntLit = haunted;
+    if (haunted) {
+      for (const key in NIGHT_TONES) for (let i = 0; i < 3; i++) TONES[key][i] = NIGHT_TONES[key][i];
+      RENDER_OPTS.directStrength = CAVE.directStrength; RENDER_OPTS.ambientFloor = CAVE.ambientFloor;
+      if (ghosts) ghosts.shade(RENDER_OPTS);
+    }
+    const arena = haunted && t.x > HAUNT.end;
+    let from = arena ? 1 : haunted ? 0 : fixedLights;
+    if (arena) {
+      const k = 0.85 + 0.15 * Math.sin(elapsed * 1.3);
+      L[0] = ARENA.x; L[1] = HAUNT.y + HERALD_FLOAT + HERALD_HEIGHT * 0.6; L[2] = ARENA.z; L[3] = GHOST_GLOW[0];
+      L[4] = GHOST_GLOW[1] * k; L[5] = GHOST_GLOW[2] * k; L[6] = GHOST_GLOW[3] * k; L[7] = 0;
+      // Through the hunt's night a lantern over each hunter still standing, nearest the view first.
+      if (ghosts) from += ghosts.lanterns(L, 1, Math.min(ghosts.lanternsWanted(), RENDER_OPTS.lightCount - 2));
+    }
     if (!poolScore) poolScore = new Float32Array(n);
     for (let i = 0; i < n; i++) { const o = i * 3, dx = P[o] - t.x, dz = P[o + 2] - t.z; poolScore[i] = dx * dx + dz * dz; }
-    for (let slot = fixedLights; slot < RENDER_OPTS.lightCount; slot++) {
+    for (let slot = from; slot < RENDER_OPTS.lightCount; slot++) {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < n; i++) if (poolScore[i] < bestD) { bestD = poolScore[i]; best = i; }
       poolScore[best] = Infinity;
@@ -920,6 +931,132 @@
       L[w] = P[o]; L[w + 1] = P[o + 1]; L[w + 2] = P[o + 2]; L[w + 3] = g[0];
       L[w + 4] = g[1] * k; L[w + 5] = g[2] * k; L[w + 6] = g[3] * k; L[w + 7] = 0;
     }
+  };
+
+  // HALLOWEEN: the ghost hunt in the arena (ghost-game.js), handed this adapter in place of the island's: the hunt works
+  // about the arena's middle (`origin`), with its herald floating there, ghosts coming in over the wall top (`ARENA_SPOTS`),
+  // the elixirs on the totems, no blight, at most four hunters, and those who wait walked out to the hallway. GAME
+  // MODE turns combat on and raises the iron fence.
+  const PARAMS = new URLSearchParams(location.search), DEBUG = PARAMS.get("debug") === "1";
+  // The arena's zone, and its older names a page loaded before #422 may still report (`arcade-hunt`, `arcade.arena`).
+  const ARENA_ZONES = new Set(["ghost-arena", "arcade-hunt", "arcade.arena"]), HALL_ZONES = new Set(["arcade.hall", "arcade.haunt", "ghost-arena.haunt", ...ARENA_ZONES]);
+  const HUNTERS = 4, FENCE_S = 1.4;
+  // Tess for the hunt's Tess drop: out of sight until the hunt flies her (`lend`), made with the hunt.
+  const arenaTess = () => {
+    const rig = BL.tess.create({ parent: root, input, fx, camera, kind: "tess", coarse: COARSE, quality: () => renderer.quality });
+    rig.root.visible = false;
+    let driver = null;
+    return {
+      lend: (d) => { driver = d; if (!d) rig.root.visible = false; },
+      update: (dt, elapsed) => { if (driver) { driver(rig, dt); rig.update(dt, elapsed); } },
+      liveGeometry: (set) => rig.liveGeometry(set),
+      dispose: () => rig.dispose()
+    };
+  };
+  // The arena's ground as the hunt asks it, about its middle: flat, round, no paths or mouths.
+  const ARENA_GROUND = {
+    surfaceAt: () => 0, onLand: (x, z) => Math.hypot(x, z) < HAUNT.arena.r, isPath: () => false, mouths: []
+  };
+  // Where ghosts come in: over the wall top all round but the hallway's mouth, as [x, y, z, bearing] about the middle
+  // (bearing from -z toward +x, rising).
+  const ARENA_SPOTS = (() => {
+    const out = [], mouth = 1.5 * Math.PI;
+    for (let i = 0; i < 90; i++) {
+      const a = i / 90 * Math.PI * 2;
+      if (Math.abs(((a - mouth + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22) continue;
+      out.push(Math.sin(a) * (HAUNT.arena.r - 1), HAUNT.arena.wall + 1.2, -Math.cos(a) * (HAUNT.arena.r - 1), a);
+    }
+    return Float64Array.from(out);
+  })();
+  const HERALD_AT = { x: 0, y: 0, z: 0 };
+  const heraldAt = (now, x, y, z) => {
+    HERALD_AT.x = x; HERALD_AT.y = y + HERALD_FLOAT + 0.12 * Math.sin(now / 1000 * 1.3); HERALD_AT.z = z;
+    return HERALD_AT;
+  };
+  const addTarget = (node, owner) => input.add(node, owner);
+  const removeTarget = (node) => input.remove(node);
+  const isPlayerAttack = (source) => !!source && !!people && source === people.player;
+  const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
+    if (hit.owner.kind !== "halloween") return;
+    if (ghosts) ghosts.hit(source, hit, power, isPlayerAttack(source), !!projectile);
+    else if (ghostEntry && hit.owner.role === "herald") ghostEntry.hit(isPlayerAttack(source), !!projectile);
+  };
+  // Outside a hunt a weapon meets only the herald waiting to be woken.
+  const weaponInteraction = (owner) => owner.kind === "halloween" && owner.role === "herald" && owner.active;
+  const setGameMode = (on) => {
+    on = !!on;
+    if (on === gameMode) return;
+    gameMode = on;
+    if (people) people.setCombatEnabled(on);
+    pilot.refreshCombat();
+    // The Ooga list stays up through a hunt, as it does in the hall.
+    document.body.classList.toggle("game-mode", on);
+  };
+  // The outside loadout is parked for this visit. The arena lends a rifle; the hall never has usable weapons.
+  const putWeaponsAway = () => {
+    const w = avatar.weapon;
+    people.selectWeapon(0, avatar);
+    w.primaryOwned = w.secondaryOwned = false;
+    people.poseWeapon(avatar);
+    pilot.refreshCombat();
+  };
+  const arm = (on) => {
+    armed = on;
+    const w = avatar.weapon;
+    if (on) {
+      rifleWas = w.unlimited; w.unlimited = true;
+      w.secondaryOwned = true;
+      // The rifle in hand, not just carried, so a shot can wake the herald (a carried rifle never fires).
+      pilot.weaponMode(2);
+      hud.hint(COARSE ? "Rifle out · tap the ghost or shoot it to start the hunt" : "Rifle out · X to aim, then shoot the ghost (or click it) to start the hunt", 6000);
+    }
+    else { w.unlimited = rifleWas; putWeaponsAway(); }
+    pilot.refreshCombat();
+  };
+  // Not in the hunt (it filled, or they never readied): walked out to the hallway before the fence rises, facing in.
+  const sendToHallway = () => {
+    if (!avatar || pilot.player !== avatar) return;
+    const p = avatar.root.position;
+    if (p.x < FENCE_X - 0.5) return;
+    const x = FENCE_X - 4, z = (HAUNT.z0 + HAUNT.z1) / 2;
+    p.x = x; p.z = z; p.y = avatar.baseY + HAUNT.y;
+    avatar.root.rotation.y = Math.PI / 2;
+    pilot.navigate({ position: { x, y: HAUNT.y, z }, yaw: -Math.PI / 2, pitch: 0.18, dist: 4 });
+  };
+  const arenaHunt = () => ({
+    root, camera, renderer, fx, hud, crew: people, island: ARENA_GROUND, npcSync: ghostChannel, coarse: COARSE, debug: DEBUG, params: PARAMS,
+    guide: tess, addTarget, removeTarget, mayDriveOoga: mayPossess, zoneOf: () => zoneNow,
+    selectOoga: (cave) => { pilot.possess(cave); return pilot.player === cave; },
+    heraldGeometry: ghostEntry && ghostEntry.herald.geometry, gorillaActive: () => false,
+    gameMode: setGameMode,
+    lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
+    spectate: (on) => { if (on) sendToHallway(); },
+    readyGun: () => {
+      if (!armed) return;
+      if (!pilot.aiming) pilot.modeAction("mode-toggle");
+      pilot.weaponMode(2);
+    },
+    holdView: (on) => { pilot.setActive(!on); pilot.controls.reset(); input.reset(); pilot.setExternalControl(on); },
+    heldAxes: () => pilot.controls.read(),
+    ringRadius: HAUNT.arena.r - 2,
+    elixirSpots: totemsAt.map((t) => t.elixir),
+    pileRadius: () => GHOST_KEEP - 0.3,
+    pileTop: () => HERALD_FLOAT + 0.9,
+    // Nudges the driven Ooga along the floor (a ghost's knock, a wraith's pull) where it could walk.
+    pull: (cave, dx, dz) => {
+      const p = cave.root.position, feet = p.y - cave.baseY;
+      if (cave.health.stunned || !walkableFor(p.x, p.z, p.x + dx, p.z + dz, feet, cave.bodyHeight, cave)) return;
+      p.x += dx; p.z += dz;
+    },
+    origin: { x: HAUNT.arena.x, y: HAUNT.y, z: HAUNT.arena.z }, spots: ARENA_SPOTS, heraldAt: (now) => heraldAt(now, 0, 0, 0),
+    heraldHeight: HERALD_HEIGHT, inZone: (zone) => ARENA_ZONES.has(zone), arenaRadius: HAUNT.arena.r, maxPlayers: HUNTERS, gatherAt: "the ghost",
+    hearing: () => huntHearing,
+    tapWakes: true, blight: false, waitingToast: "A hunt is on · wait in the hallway until the arena opens"
+  });
+  const attachHunt = () => {
+    tess = arenaTess();
+    ghosts = BL.halloween.create(arenaHunt());
+    return ghosts;
   };
 
   // A walker is held off things by its torso, not its arms: a square `BODY` m either side of its middle (all of it,
@@ -930,7 +1067,25 @@
   const BODY = 0.4, SIDE_FACE = HALL.halfW - 0.49, FRONT_FACE = HALL.front - 0.27, BACK_FACE = HALL.back + 0.15, JAMB = HALL.door - 0.35;
   // How far a body of half-width r at (x, z) reaches through the walls, negative when it is clear of them: the front
   // wall stands either side of the doorway, whose jambs run on out through the rock.
-  const wallDepth = (x, z, r) => Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
+  // A body on the deck's level (`feet` given) may go on through the right wall into the haunted hallway, held
+  // `HAUNT_SIDE` off its walls, where its pumpkins and torches stand, and out into the arena, held `ARENA_SIDE` off
+  // its wall and, while no hunt is on, `GHOST_KEEP` from its middle, outside the ghost's ring and the bones round it
+  // (in a hunt the herald is gone and the hunters may cross it).
+  // Its totems stand in the way, each `keep` round; while a hunt runs the iron fence closes the mouth, FENCE_GAP either
+  // side of FENCE_X.
+  const ARENA = HAUNT.arena, HAUNT_SIDE = 0.65, ARENA_SIDE = 0.75, GHOST_KEEP = 3.7, FENCE_X = HAUNT.end - 0.05, FENCE_GAP = 0.15, HALLWAY_HOLD = 0.03;
+  const wallDepth = (x, z, r, feet = 0) => {
+    const hall = Math.max(Math.abs(x) + r - SIDE_FACE, BACK_FACE + r - z, Math.min(z + r - FRONT_FACE, Math.abs(x) + r - JAMB));
+    if (feet < HAUNT.y - 1) return hall;
+    const d = Math.hypot(x - ARENA.x, z - ARENA.z), fenced = fenceK > 0.15;
+    let arena = Math.max(d + r - ARENA.r + ARENA_SIDE, gameMode ? -Infinity : GHOST_KEEP + r - d, fenced ? FENCE_X + FENCE_GAP + r - x : -Infinity);
+    for (let i = 0; i < totemsAt.length; i++) arena = Math.max(arena, AM.ARENA_TOTEMS.keep + r - Math.hypot(x - totemsAt[i].x, z - totemsAt[i].z));
+    return Math.min(hall, Math.max(HALL.halfW - 2 + r - x, x + r - (fenced ? FENCE_X - FENCE_GAP : HAUNT.end + 2), HAUNT.z0 + HAUNT_SIDE + r - z, z + r - HAUNT.z1 + HAUNT_SIDE), arena);
+  };
+  // Whether a body at (x, z) with its feet at `feet` is in the arena (the hunt's ground; its hallway is not).
+  const inArenaRing = (x, z, feet) => feet > HAUNT.y - 1 && Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r;
+  // Whether (x, z) is in the haunted hallway, its mouth or the arena.
+  const inHaunt = (x, z) => x > HALL.halfW - 1 && z > HAUNT.z0 && z < HAUNT.z1 || Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r + 1;
   // The deck's rail between the stairs and each stair's handrail on the hall's side (the other runs along the side
   // wall, which keeps a walker off it already), boxes as `blocks` are ([x0, x1, z0, z1, and the feet from, to]), so a
   // walker keeps its body inside a stair and behind the rail, and off a stair's side from the floor. The deck rail's
@@ -941,7 +1096,8 @@
     return [c - 0.11, c + 0.11, head, foot + 0.11, -1, MEZZ.y + 2];
   })];
   // The floors a walker stands on, the highest within a step of its feet: the cave floor, the stage's two rings, the
-  // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends). Allocation-free.
+  // mezzanine's deck and the stair up to it (a ramp, running a little on past both ends), and the haunted hallway's
+  // and the arena's floor, level with the deck. Allocation-free.
   const STEP = 0.6, STAIRS = MEZZ.stairs.map(([x, foot, , head]) => ({ x0: x - MEZZ.stairW / 2, x1: x + MEZZ.stairW / 2, foot, head, run: foot - head }));
   const supportAt = (x, z, feet) => {
     const reach = feet + STEP;
@@ -950,6 +1106,7 @@
     if (d <= STAGE.inner && STAGE.high <= reach) best = STAGE.high;
     else if (d <= STAGE.r && STAGE.low <= reach) best = STAGE.low;
     if (z >= MEZZ.z0 && z <= MEZZ.z1 && MEZZ.y <= reach) best = MEZZ.y;
+    if (HAUNT.y > best && HAUNT.y <= reach && x > HALL.halfW - 1 && inHaunt(x, z)) best = HAUNT.y;
     for (let i = 0; i < STAIRS.length; i++) {
       const st = STAIRS[i];
       if (x < st.x0 || x > st.x1 || z > st.foot + 0.3 || z < st.head - 0.3) continue;
@@ -984,27 +1141,67 @@
   // nor take the body further into a wall, a rail or a machine than it already is, each on its own
   // (so being deep in one, as off the stage's side among the roots, is no way into the next): from wherever it
   // stands, even a play spot tucked close to its machine, the Ooga can always walk away or along, never into.
-  const walkableFor = (ax, az, bx, bz, y, height, actor) => {
+  // A step in the air, a jump's or a fall's: the walls, the stairs' undersides, the rails and the blocks hold it as they
+  // hold a walk, but the floor may lie any way below, so a walking or running jump carries on as on the island (#420).
+  const flyableFor = (ax, az, bx, bz, y, height, actor) => {
     const r = Math.min(actor.bodyRadius || BODY, BODY);
-    if (bz > HALL.front + 2 || supportAt(bx, bz, y) < y - STEP || underStair(bx, bz, y)) return false;
-    if (wallDepth(bx, bz, r) > Math.max(0, wallDepth(ax, az, r)) + 1e-6) return false;
+    if (bz > HALL.front + 2 && bx < HALL.halfW || underStair(bx, bz, y)) return false;
+    if (wallDepth(bx, bz, r, y) > Math.max(0, wallDepth(ax, az, r, y)) + 1e-6) return false;
     for (let i = 0; i < blocks.length; i++) if (!clearOf(blocks[i], ax, az, bx, bz, r, y)) return false;
     for (let i = 0; i < RAILS.length; i++) if (!clearOf(RAILS[i], ax, az, bx, bz, r, y)) return false;
     return true;
   };
+  // On foot, a step also keeps the floor within a step below.
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => supportAt(bx, bz, y) >= y - STEP && flyableFor(ax, az, bx, bz, y, height, actor);
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
-  // The station nearest (x, z) on the walker's own level: the deck's cabinets stand over the claws and pinball.
-  const nearStation = (x, z, reach) => {
+  // Open air a view passes through (#420): the hall over its floor and under its roof, but for the deck's floor; the
+  // haunted hallway; and the arena, open to the sky. Rock, walls and floors are all the rest.
+  const DECK_SLAB = 0.35, SIGHT_STEP = 0.25, SIGHT_END = 0.4;
+  const airAt = (x, y, z) => {
+    if (Math.abs(x) < HALL.halfW && z > HALL.back && z < HALL.front && y > 0 && y < HALL.h) return !(z < MEZZ.z1 && y > MEZZ.y - DECK_SLAB && y < MEZZ.y);
+    if (x > HALL.halfW - 1 && x < HAUNT.end + 2 && z > HAUNT.z0 && z < HAUNT.z1 && y > HAUNT.y && y < HAUNT.y + HAUNT.h) return true;
+    return y > HAUNT.y && Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r;
+  };
+  // Whether no rock, wall or floor stands between a and b, by open air every SIGHT_STEP along the line: a view starting
+  // inside rock (a camera pressed into a wall) counts from its first open point, and the last SIGHT_END before b is not
+  // asked, so a game standing against a wall is still seen. Allocation-free.
+  const sightClear = (ax, ay, az, bx, by, bz) => {
+    const dx = bx - ax, dy = by - ay, dz = bz - az, length = Math.hypot(dx, dy, dz), n = Math.floor((length - SIGHT_END) / SIGHT_STEP);
+    let open = false;
+    for (let i = 0; i <= n; i++) {
+      const t = i * SIGHT_STEP / length;
+      if (airAt(ax + dx * t, ay + dy * t, az + dz * t)) open = true;
+      else if (open) return false;
+    }
+    return true;
+  };
+  // A pick seen from the camera; its target's middle stands for it.
+  const inView = (hit) => { const m = hit.node.world, c = camera.position; return sightClear(c.x, c.y, c.z, m[12], m[13], m[14]); };
+  // What the overlay draws at a place (an NPC's line, a player's name, the hunt's marks) shows only where it can be seen:
+  // from inside the arena, nothing from outside the hallway and the arena, without a test, and otherwise along an open
+  // line from the view (fx's `overlayVisible`, and `characterOccluded` for a line over a character's head).
+  const pointHidden = (x, y, z) => {
+    if (armed && !inHaunt(x, z)) return true;
+    const c = camera.position;
+    return !sightClear(c.x, c.y, c.z, x, y, z);
+  };
+  const speakerHidden = (cave) => { const p = cave.root.position; return pointHidden(p.x, p.y + 1.2, p.z); };
+  // The station nearest (x, z) on the walker's own level and in its sight: the deck's cabinets stand over the claws and
+  // pinball, and nothing is played through a wall or a floor.
+  const nearStation = (x, z, reach, playable = false) => {
     let found = null, best = reach * reach;
     const feet = feetOf();
+    // Space remains a jump unless the visitor is planted and looking into the station.
+    if (playable && (!avatar || avatar.hop > 0 || avatar.hopV > 0 || Math.abs(feet - supportAt(x, z, feet)) > 0.05)) return null;
     for (let i = 0; i < stations.length; i++) {
-      const p = stations[i].play, d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z);
-      if (d < best && Math.abs((stations[i].y || 0) - feet) < 1.2) { best = d; found = stations[i]; }
+      const s = stations[i], p = s.play, d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z), y = s.y || 0;
+      if (playable && Math.cos(avatar.root.rotation.y - p.facing) < 0.5) continue;
+      if (d < best && Math.abs(y - feet) < 1.2 && sightClear(x, feet + 1.1, z, p.x, y + 1.1, p.z)) { best = d; found = s; }
     }
     return found;
   };
   const useNear = (x, z, reach) => {
-    const s = nearStation(x, z, Math.max(reach, REACH));
+    const s = nearStation(x, z, Math.max(reach, REACH), true);
     if (!s) return false;
     useStation(s);
     return true;
@@ -1014,25 +1211,17 @@
   // Six gorillas run the hall, one crew in the staff's red and gold with each role's own piece (`AM.staffHat`,
   // `AM.staffVest`, and the `AM.staffProp` its jobs take in hand). Each works a routine of jobs picked at random
   // (cosmetic, so `Math.random`): it walks there on a route planned round everything in the hall (the deck's attendant
-  // on the deck), turns to the work, does it for a few seconds with part rotations and its prop, now and then stops for
-  // a word with an Ooga, and moves on. The nearest one greets the visitor walking up, and the gamemaster leads the room
-  // when the wheel pays out. They give way to the visitor, the strolling Oogas and each other, and block nobody.
-  // Each role: its hat, uniform and prop (-1 none) and the arm holding it, whether it walks upright (prop in hand) or
-  // on its knuckles, whether it keeps to the deck, its jobs (one listed twice comes up twice as often), its greeting
-  // for the visitor and its words with an Ooga.
+  // on the deck), turns to its maintenance work, then moves on. They avoid one another and scenery,
+  // but neither react to nor block live players.
+  // Each role: its hat, uniform and prop (-1 none) and the arm holding it, whether it keeps to the deck and its
+  // jobs (one listed twice comes up twice as often). All staff walk upright between jobs.
   const ROLES = [
-    { id: "gamemaster", hat: 0, vest: 0, prop: 0, hand: "armR", upright: true, deck: false, start: "host", jobs: ["host", "host", "wheel", "fame", "welcome", "call", "call"],
-      hello: "Welcome, welcome! Step right up!", chat: ["You play good, Ooga!", "Big score coming. Me feel it!", "Spin wheel! Jackpot waiting!"] },
-    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: false, deck: false, start: "totem", jobs: ["totem", "muncher", "tokens", "tokens", "whistle"],
-      hello: "Need tokens? Me got tokens!", chat: ["More tokens? Me got!", "No bite tokens, Ooga.", "Play fair. Have fun!"] },
-    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: false, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"],
-      hello: "All machines fixed. Go play!", chat: ["Machine sound funny? Tell me.", "No kick machine, Ooga!", "Me fix. Me smart."] },
-    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"],
-      hello: "Coconut? Fresh off tree!", chat: ["Thirsty? Coconut coming!", "Slurp slurp, good!", "Grub on stick later!"] },
-    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: false, deck: false, start: "stock", jobs: ["stock", "stock", "claw", "tickets", "tickets", "muncher", "bucket"],
-      hello: "Tickets buy prizes! Come see!", chat: ["Many tickets! Prize soon!", "Crown prize shiny. You want?", "Count tickets. Me count good."] },
-    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: false, deck: true, start: "dust", jobs: ["dust", "dust", "fan", "rail"],
-      hello: "Hoo! Old games up here! Come play!", chat: ["Dust gone. Games shiny.", "Fire up here warm!", "Coconut Invaders! Me love."] }
+    { id: "gamemaster", hat: 0, vest: 0, prop: 1, hand: "armR", upright: true, deck: false, start: "tap", jobs: ["tap", "fix"] },
+    { id: "attendant", hat: 1, vest: 1, prop: -1, hand: "armL", upright: true, deck: false, start: "totem", jobs: ["totem", "muncher"] },
+    { id: "mechanic", hat: 2, vest: 2, prop: 1, hand: "armL", upright: true, deck: false, start: "fix", jobs: ["fix", "fix", "fix", "tap"] },
+    { id: "runner", hat: 3, vest: 3, prop: 2, hand: "armL", upright: true, deck: false, start: "fill", jobs: ["fill", "serve"] },
+    { id: "clerk", hat: 1, vest: 4, prop: 3, hand: "armL", upright: true, deck: false, start: "stock", jobs: ["stock", "claw", "muncher", "bucket"] },
+    { id: "keeper", hat: 1, vest: 4, prop: 4, hand: "armL", upright: true, deck: true, start: "dust", jobs: ["dust", "dust", "fan"] }
   ];
   // Each job: the pose it is worked in, how long (s), whether the role's prop comes out, how often it speaks up and
   // what it says, a cue at the start and one repeated while it works ([name, every s, loudness]). Its spots are laid
@@ -1040,7 +1229,7 @@
   const JOBS = {
     host: { pose: "host", time: [6, 9], prop: true, talk: 0.8, cue: "grunt", tick: null, say: ["Step up! Step up!", "Ooga games! Best in cave!", "Who beat top Ooga today?", "Coconuts fly! Games on!"] },
     wheel: { pose: "wheel", time: [4, 5.5], prop: true, talk: 1, cue: "bell", tick: null, say: [`Spin the wheel! ${AM.WHEEL_COST} tickets!`, `Jackpot ${WHEEL_JACKPOT} tickets! Who spin?`] },
-    fame: { pose: "point", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Best Oogas up there! You next?", "Beat score, go up on stones!"] },
+    fame: { pose: "point", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Machine records up there! You next?", "Sign in, beat score, go up on stones!"] },
     welcome: { pose: "bow", time: [4, 6], prop: true, talk: 0.8, cue: "grunt", tick: null, say: ["Welcome to Ooga Arcade!", "Come in! Games hot!"] },
     call: { pose: "call", time: [4, 6], prop: true, talk: 0.8, cue: null, tick: null, say: ["Thro-ball! Roll coconut, win big!", "Claw sneaky. Try claw!", "Hoop! Coconut in basket!", "Coconut Toss! Bonk bonk!"] },
     totem: { pose: "reach", time: [4, 6], prop: false, talk: 0.5, cue: null, tick: ["coin", 0.55, 0.6], say: ["Totem full. Tokens ready!", "Banana in, token out!"] },
@@ -1060,8 +1249,6 @@
     rail: { pose: "rail", time: [3.5, 5], prop: false, talk: 0.8, cue: null, tick: null, say: ["Ooga! Games up here!", "Hoo hoo! Me see you!"] }
   };
   for (const id in JOBS) Object.assign(JOBS[id], { id, spots: [] });
-  // What an Ooga says back.
-  const REPLIES = ["Ooga!", "Hoo! Thanks!", "Me win big!", "Ooga booga!", "Slurp!", "Yes yes!"];
   const CREW_SCALE = 0.72, CREW_BODY = 0.38, CREW_AHEAD = 0.2, GIVE_WAY = 1, CREW_TOUCH = 0.75, ROUTE_CAP = 24, AVOID_R = 1.35;
   // Where each prop sits on its arm (the fist is at its end), whether it is held level whatever the arm does (the
   // tray, and the roll so its strip hangs), and otherwise its turn about x (out along the arm); the tray sits between
@@ -1223,9 +1410,6 @@
   const avoidFor = (g, crowded) => {
     plan.avoidN = 0;
     for (let i = 0; i < staff.length; i++) { const o = staff[i], q = o.agent.root.position; if (o !== g && o.deck === g.deck && (crowded || o.phase !== "walk")) avoidAdd(g, q.x, q.z); }
-    if (!crowded) return;
-    if (avatar && Math.abs(feetOf() - g.agent.root.position.y) < 1) avoidAdd(g, avatar.root.position.x, avatar.root.position.z);
-    if (!g.deck && g.stuck < 0.5) for (let i = 0; i < walkers.length; i++) avoidAdd(g, walkers[i].x, walkers[i].z);
   };
   // Sets g walking its route to (g.tx, g.tz); false when there is none.
   const route = (g, crowded) => {
@@ -1244,12 +1428,8 @@
 
   // A gorilla's step: its torso, a square `CREW_BODY` m either side of a middle `CREW_AHEAD` m out ahead of its feet,
   // held off walls, rails and blocks as an Ooga's is, on its own level (the floor and the stage, never the stairs, or
-  // the deck and never off it), and giving way: it never walks on closer than `GIVE_WAY` m into the visitor, a
-  // strolling Ooga, a gorilla standing at work or one walking ahead of it in the crew's order (so two walking never
-  // both wait on each other from afar; any other only closer than `CREW_TOUCH`, where the one behind has already
-  // stopped); routes keep `AVOID_R` m off them, wider, so a detour is never refused. A strolling Ooga
-  // walks on regardless, so after half a second of waiting on one the gorilla goes on too; and after a second hemmed
-  // in by the crew (one at work in a narrow way, two nose to nose) it squeezes past.
+  // the deck and never off it). Staff give way to each other in rank order; live players do not alter their route.
+  // After a second hemmed in by another worker it squeezes past.
   const giveWay = (ax, az, bx, bz, ox, oz, r) => {
     const to = (bx - ox) * (bx - ox) + (bz - oz) * (bz - oz);
     return to >= r * r || to >= (ax - ox) * (ax - ox) + (az - oz) * (az - oz);
@@ -1261,8 +1441,7 @@
     if (wallDepth(x1, z1, CREW_BODY) > Math.max(0, wallDepth(x0, z0, CREW_BODY)) + 1e-6) return false;
     for (let i = 0; i < blocks.length; i++) if (!clearOf(blocks[i], x0, z0, x1, z1, CREW_BODY, y)) return false;
     for (let i = 0; i < RAILS.length; i++) if (!clearOf(RAILS[i], x0, z0, x1, z1, CREW_BODY, y)) return false;
-    if (avatar && Math.abs(feetOf() - y) < 1 && !giveWay(x0, z0, x1, z1, avatar.root.position.x, avatar.root.position.z, GIVE_WAY)) return false;
-    if (!g.deck && g.stuck < 0.5) for (let i = 0; i < walkers.length; i++) if (!giveWay(x0, z0, x1, z1, walkers[i].x, walkers[i].z, GIVE_WAY)) return false;
+
     if (g.stuck < 1) for (let i = 0; i < staff.length; i++) { const o = staff[i]; if (o !== g && o.deck === g.deck && !giveWay(x0, z0, x1, z1, o.mx, o.mz, i < g.rank || o.phase !== "walk" ? GIVE_WAY : CREW_TOUCH)) return false; }
     return true;
   };
@@ -1287,24 +1466,10 @@
     LAYOUT.changers.forEach((p, i) => { toHall(p, 0, 1.15, at); spot(i ? "muncher" : "totem", at.x, at.z, p.turn + Math.PI); });
     // The attendant keeps an eye on the kiddie rides from the entry avenue, by the silverback and by the baby mammoth.
     for (const [x, z, i] of [[3.1, 3.5, 0], [3.1, -0.1, 3]]) { const r = LAYOUT.rides[i]; spot("whistle", x, z, toward(x, z, r.x, r.z)); }
-    // Beside an Ooga: at its side or a little behind, wherever the floor is open, facing it.
-    const beside = (id, m) => {
-      const f = m.facing, sx = Math.cos(f), sz = -Math.sin(f), fx0 = Math.sin(f), fz0 = Math.cos(f);
-      for (const [side, back] of [[1.35, 0.45], [-1.35, 0.45], [0, 1.5], [1.55, -0.2], [-1.55, -0.2]]) {
-        const x = m.x + sx * side - fx0 * back, z = m.z + sz * side - fz0 * back, c = cellAt(x, z);
-        if (c >= 0 && plan.open[c] & FLOOR) return spot(id, x, z, toward(x, z, m.x, m.z), m);
-      }
-    };
-    for (let i = 0; i < crowd.length; i++) {
-      const m = crowd[i];
-      if (m.pose === "skee" || m.pose === "shoot") { beside("tokens", m); beside("tickets", m); }
-      else if (m.pose === "claw" || m.pose === "pinball" || m.pose === "hockey") beside("tokens", m);
-      else if (m.pose === "cheer" || m.pose === "queue") beside("serve", m);
-    }
     // Every machine and cabinet nobody plays, from its player's spot; the pool tables from each side too.
     for (let i = 0; i < stations.length; i++) {
       const st = stations[i], p = st.play;
-      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.game && st.game.kind === "darts") || crowd.some((m) => Math.abs(m.x - p.x) + Math.abs(m.z - p.z) < 1.2)) continue;
+      if ((st.kind !== "machine" && st.kind !== "cabinet") || (st.kind === "cabinet" && GAMES[st.game].unavailable) || (st.game && st.game.kind === "darts")) continue;
       spot("fix", p.x, p.z, p.facing);
       if (st.kind === "machine" && st.game.kind === "claw") spot("claw", p.x, p.z, p.facing);
     }
@@ -1312,11 +1477,10 @@
     toHall(LAYOUT.snack, -1.1, 1.75, at); spot("fill", at.x, at.z, LAYOUT.snack.turn + Math.PI);
     // A table is served from its first open side with no one sitting there, and its sitter answers.
     for (const [x, z] of LAYOUT.tables) {
-      const sitter = crowd.find((m) => m.pose === "sit" && Math.abs(m.x - x) < 1.6 && Math.abs(m.z - z) < 1.6) || null;
       for (const [dx, dz] of [[0, -1.45], [1.75, 0.2], [-1.75, 0.2], [0, 1.9]]) {
         const c = cellAt(x + dx, z + dz);
-        if (c < 0 || !(plan.open[c] & FLOOR) || (sitter && Math.hypot(sitter.x - x - dx, sitter.z - z - dz) < 1)) continue;
-        spot("serve", x + dx, z + dz, toward(x + dx, z + dz, x, z), sitter);
+        if (c < 0 || !(plan.open[c] & FLOOR)) continue;
+        spot("serve", x + dx, z + dz, toward(x + dx, z + dz, x, z));
         break;
       }
     }
@@ -1334,30 +1498,22 @@
     for (const x of [-8, -3.5, 3.5, 8]) spot("rail", x, MEZZ.z1 - 0.95, 0);
   };
 
-  // Whether spot s is within 1.5 m of the visitor, on the level of feet at y: no gorilla starts or takes a job there
-  // (back from a game, the visitor stands at that machine's play spot).
-  const byVisitor = (s, y) => {
-    if (!avatar || Math.abs(feetOf() - y) >= 1) return false;
-    const q = avatar.root.position;
-    return (s.x - q.x) * (s.x - q.x) + (s.z - q.z) * (s.z - q.z) < 2.25;
-  };
-  // Hires the crew for the visit, once the room, its Oogas and the visitor are in place: each gorilla starts at work
-  // at its first job's first free spot clear of the visitor.
+  // Maintenance routes depend on scenery and other staff, never on live players.
   const hireCrew = () => {
     layPlan();
     layJobs();
-    crewSay = crewGreet = 0;
+    crewSay = 0;
     staff = [];
     for (const role of ROLES) {
-      const spots = JOBS[role.start].spots, level = role.deck ? MEZZ.y : 0;
-      const s = spots.find((q) => !q.taken && !byVisitor(q, level)) || spots.find((q) => !q.taken), y = role.deck ? MEZZ.y : supportAt(s.x, s.z, 0.5);
+      const spots = JOBS[role.start].spots;
+      const s = spots.find((q) => !q.taken), y = role.deck ? MEZZ.y : supportAt(s.x, s.z, 0.5);
       const pts = Array.from({ length: ROUTE_CAP }, () => ({ x: 0, z: 0 })), routes = [null];
       for (let n = 1; n <= ROUTE_CAP; n++) routes.push(pts.slice(0, n));
       const g = {
         role, rank: staff.length, deck: role.deck, agent: null, prop: null, pts, routes, n: 0, routeLen: 0, partial: false,
         phase: "work", t: 0, dur: 0, spot: s, last: null, job: s.job, face: s.facing, tx: s.x, tz: s.z,
-        stuck: 0, skip: 0, ax: s.x, az: s.z, replan: 0, walkT: 0, walkMax: 0, blend: 1, carry: 0, carrying: false, greetCool: 0, resume: "", resumeT: 0, resumeDur: 0,
-        said: false, tick: 0, spun: false, replied: false, chatted: false, with: null, mx: s.x, mz: s.z, walked: 0, done: 0
+        stuck: 0, skip: 0, ax: s.x, az: s.z, replan: 0, walkT: 0, walkMax: 0, blend: 1, carry: 0, carrying: false,
+        said: false, tick: 0, spun: false,  mx: s.x, mz: s.z, walked: 0, done: 0
       };
       g.agent = BL.agent.create({ groundAt: (x, z) => supportAt(x, z, g.agent ? g.agent.root.position.y : y), walkable: (ax, az, bx, bz, feet) => crewStep(g, ax, az, bx, bz, feet), form: "ape", x: s.x, z: s.z, heading: s.facing, scale: CREW_SCALE });
       const P = g.agent.parts;
@@ -1394,7 +1550,7 @@
       if (g.role.id === "runner" && (job === JOBS.serve) !== g.carrying) continue;
       for (let k = 0; k < job.spots.length && n < CAND.length; k++) {
         const s = job.spots[k], d = (s.x - p.x) * (s.x - p.x) + (s.z - p.z) * (s.z - p.z);
-        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far || byVisitor(s, p.y)) continue;
+        if (s.taken || s === g.last || claimedNear(g, s) || d < near * near || d > far * far) continue;
         CAND[n++] = s;
       }
     }
@@ -1421,66 +1577,25 @@
     const job = g.job, p = g.agent.root.position;
     g.agent.place(p.x, p.z, g.agent.heading);
     g.phase = "work"; g.t = 0; g.dur = job.time[0] + Math.random() * (job.time[1] - job.time[0]);
-    g.said = g.spun = g.replied = false; g.tick = 0.3;
+    g.said = g.spun = false; g.tick = 0.3;
   };
-  // A word with the nearest Ooga at play or strolling within 3.2 m (not on the deck), who waves and answers.
-  const chat = (g) => {
-    if (g.deck) return false;
-    const p = g.agent.root.position;
-    let near = null, best = 3.2 * 3.2;
-    for (let i = 0; i < crowd.length + walkers.length; i++) {
-      const m = i < crowd.length ? crowd[i] : walkers[i - crowd.length], q = m.cave.root.position, d = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
-      if (d < best) { best = d; near = m; }
-    }
-    if (!near) return false;
-    g.phase = "chat"; g.t = 0; g.dur = 2.6; g.with = near; g.replied = false; g.chatted = true;
-    crewSays(g, g.role.chat[Math.floor(Math.random() * g.role.chat.length)]);
-    near.wave = 1.8;
-    return true;
-  };
-  // The end of whatever g was doing: back to the work or walk a greeting broke into, a word after a job now and then,
-  // else the next job.
   const finish = (g) => {
-    if (g.phase === "greet" || g.phase === "cheer") {
-      if (g.resume === "work" && g.spot) { g.phase = "work"; g.t = g.resumeT; g.dur = g.resumeDur; g.face = g.spot.facing; return; }
-      if (g.resume === "walk" && g.spot) { g.phase = "walk"; g.t = 0; g.walkT = 0; g.stuck = 0; if (route(g, true)) return; }
-      return nextJob(g);
-    }
     if (g.phase === "work") {
       g.done++;
       if (g.job === JOBS.fill) g.carrying = true;
       if (g.job === JOBS.serve) g.carrying = false;
-      if (!g.chatted && Math.random() < 0.3 && chat(g)) return;
     }
-    g.chatted = g.phase === "chat";
     nextJob(g);
   };
-  // A greeting or a cheer breaks into whatever g was doing, stopping it where it is.
-  const interrupt = (g, phase, dur, face) => {
-    const p = g.agent.root.position;
-    if (g.phase !== "greet" && g.phase !== "cheer") { g.resume = g.phase; g.resumeT = g.t; g.resumeDur = g.dur; }
-    g.phase = phase; g.t = 0; g.dur = dur; g.face = face;
-    g.agent.place(p.x, p.z, g.agent.heading);
-  };
   // One line at a time from the crew, and only from one near the visitor, over its head.
-  let crewSay = 0, crewGreet = 0;
+  let crewSay = 0;
   const crewSays = (g, text, always = false) => {
     const p = g.agent.root.position, q = avatar ? avatar.root.position : pilot.orbit.target;
     if ((!always && crewSay > 0) || Math.abs(p.x - q.x) + Math.abs(p.z - q.z) > 16) return;
     crewSay = 2.4;
     fx.sayAt(p.x, p.y + 2, p.z, text, 1.9);
   };
-  // The gamemaster takes up the wheel's moments with his line: a cheer toward it (a big win, the visitor back with
-  // more tickets), or with `cheer` false a wave to the visitor (a small win).
-  const hostSays = (text, cheer) => {
-    const g = staff[0], p = g.agent.root.position, W = LAYOUT.wheel;
-    interrupt(g, cheer ? "cheer" : "greet", cheer ? 3.5 : 2.4, Math.atan2(W.x - p.x, W.z - p.z));
-    crewSays(g, text, true);
-    hear(p.x, p.z, cheer ? "ooga" : "grunt", 0.8);
-  };
-  // While at work: its line and cue once it has settled, the cue repeated as it works, and what the job does to the
-  // room: the wheel drifts on under a push (never a spin that stops on a value), the fanned fire flares, and the Ooga
-  // it is done for waves and answers.
+  // Maintenance cues belong to the current job, independent of the visitor's actions.
   const work = (g, dt) => {
     const job = g.job, s = g.spot, p = g.agent.root.position;
     if (!g.said && g.t > 0.5) {
@@ -1493,14 +1608,7 @@
     if (job === JOBS.fill && g.t > g.dur * 0.55) g.carrying = true;
     if (job === JOBS.serve && g.t > g.dur * 0.55) g.carrying = false;
     if (s.flame >= 0) { const f = lit.flames[s.flame], k = 1.25 + Math.sin(g.t * 9) * 0.15; f.node.scale.x *= k; f.node.scale.y *= k; f.node.scale.z *= k; f.node.glow *= k; }
-    if (s.member && !g.replied && g.t > 1.4) { g.replied = true; answer(s.member); }
   };
-  const answer = (m) => {
-    const q = m.cave.root.position;
-    m.wave = 1.6;
-    fx.sayAt(q.x, (m.pose ? m.y : 0) + 2.2, q.z, REPLIES[Math.floor(Math.random() * REPLIES.length)], 1.6);
-  };
-
   // The pose g works in, as target angles into `POSE`: the chest's lean from upright, the thighs' swing (forward
   // negative; the hips sink to keep the feet down), each arm's raise from hanging straight down (a quarter turn
   // points it ahead, a half turn straight up) and its swing out to the side, the right forearm's twist, and the
@@ -1509,7 +1617,7 @@
   const posture = (g, i) => {
     const Z = POSE, t = g.t, kind = g.phase === "work" ? g.job.pose : g.phase;
     Z.pitch = 0.1; Z.legs = 0; Z.lx = Z.rx = 0.15; Z.lz = Z.rz = Z.ry = 0; Z.hx = 0.05; Z.hy = 0;
-    if (kind === "cheer" || (cheerT > 0 && kind !== "greet")) { Z.lx = Z.rx = 2.85 + Math.sin(t * 9 + i) * 0.15; Z.lz = -0.3; Z.rz = 0.3; Z.pitch = 0.05; Z.hx = -0.3; return; }
+    if (kind === "cheer") { Z.lx = Z.rx = 2.85 + Math.sin(t * 9 + i) * 0.15; Z.lz = -0.3; Z.rz = 0.3; Z.pitch = 0.05; Z.hx = -0.3; return; }
     switch (kind) {
       case "host": Z.pitch = 0.08; Z.lx = 1.7 + Math.sin(t * 3) * 0.12; Z.lz = -0.3; Z.rx = 1.1 + Math.sin(t * 1.7) * 0.5; Z.rz = 0.55; Z.hx = -0.1; Z.hy = Math.sin(t * 0.9) * 0.45; break;
       case "wheel": Z.pitch = 0.05; Z.lx = Z.rx = 2.65 + Math.sin(t * 4) * 0.1; Z.lz = -0.45; Z.rz = 0.45; Z.hx = -0.35; break;
@@ -1574,34 +1682,15 @@
   // next job instead, so none stands stuck.
   const crewUpdate = (dt) => {
     crewSay = Math.max(0, crewSay - dt);
-    crewGreet = Math.max(0, crewGreet - dt);
-    if (avatar && crewGreet <= 0) {
-      const q = avatar.root.position, feet = feetOf();
-      let near = null, best = 2.6 * 2.6;
-      for (let i = 0; i < staff.length; i++) {
-        const g = staff[i], p = g.agent.root.position, d = (p.x - q.x) * (p.x - q.x) + (p.z - q.z) * (p.z - q.z);
-        if (g.greetCool <= 0 && g.phase !== "greet" && g.phase !== "cheer" && Math.abs(p.y - feet) < 1 && d < best) { best = d; near = g; }
-      }
-      if (near) {
-        crewGreet = 4;
-        near.greetCool = 30;
-        interrupt(near, "greet", 2.4, 0);
-        crewSays(near, near.role.hello, true);
-        hear(q.x, q.z, "grunt", 0.7);
-      }
-    }
     for (let i = 0; i < staff.length; i++) {
       const g = staff[i], a = g.agent, p = a.root.position;
       g.t += dt;
-      g.greetCool = Math.max(0, g.greetCool - dt);
-      if (g.phase === "greet" && avatar) g.face = Math.atan2(avatar.root.position.x - p.x, avatar.root.position.z - p.z);
-      if (g.phase === "chat") { const q = g.with.cave.root.position; g.face = Math.atan2(q.x - p.x, q.z - p.z); if (!g.replied && g.t > 1.1) { g.replied = true; answer(g.with); } }
       // Standing: turned toward its work and up on its feet; walking upright, kept upright.
       if (g.phase === "walk") { if (g.role.upright && a.walking && !a.beating) a.setGait("upright"); }
       else if (!a.beating) {
         const turn = Math.atan2(Math.sin(g.face - a.heading), Math.cos(g.face - a.heading));
         if (Math.abs(turn) > 0.004) a.place(p.x, p.z, a.heading + turn * (1 - Math.exp(-7 * dt)));
-        a.setGait(g.phase === "wait" ? "idle" : "beat");
+        a.setGait(g.phase === "wait" ? "upright" : "beat");
       }
       const x0 = p.x, z0 = p.z;
       a.update(dt);
@@ -1628,7 +1717,7 @@
       }
       const standing = g.phase !== "walk" && g.phase !== "wait" && !a.beating;
       g.blend += ((standing ? 1 : 0) - g.blend) * Math.min(1, dt * 7);
-      const hold = g.role.id === "gamemaster" ? g.phase === "walk" : g.carrying && (g.phase !== "work" || cheerT > 0);
+      const hold = g.role.id === "gamemaster" ? g.phase === "walk" : g.carrying && (g.phase !== "work");
       g.carry += ((hold && !a.beating ? 1 : 0) - g.carry) * Math.min(1, dt * 7);
       pose(g, i);
       g.mx = p.x + Math.sin(a.heading) * CREW_AHEAD;
@@ -1637,17 +1726,34 @@
   };
 
   const enter = (ctx) => {
+    prefetchAt = 0;
+    queuedCabinet = typeof ctx.place === "string" && ctx.place.startsWith("cabinet:") ? ctx.place.slice(8) : null;
     ({ renderer, game, world, go, agentPlay } = ctx);
-    canvasEl = ctx.canvas;
-    window.addEventListener("keydown", armsKeys, true);
-    canvasEl.addEventListener("pointerdown", rightClick, true);
+    cabinetView = ctx.cabinet;
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
-    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
+    // In the haunted hallway the view's target and the camera keep to the passage under its roof, and in the arena
+    // inside its wall and under its top, `pad` from each.
+    const haunting = () => avatar && feetOf() > HAUNT.y - 1 && inHaunt(avatar.root.position.x, avatar.root.position.z);
+    const keepHaunted = (p, pad) => {
+      if (p.x > HAUNT.end) {
+        const dx = p.x - ARENA.x, dz = p.z - ARENA.z, d = Math.hypot(dx, dz), m = ARENA.r - pad * 2;
+        if (d > m) { p.x = ARENA.x + dx / d * m; p.z = ARENA.z + dz / d * m; }
+        p.y = clamp(p.y, HAUNT.y + pad, HAUNT.y + ARENA.wall - pad);
+        return;
+      }
+      p.y = clamp(p.y, HAUNT.y + pad, HAUNT.y + HAUNT.h - pad);
+      p.z = clamp(p.z, HAUNT.z0 + pad, HAUNT.z1 - pad);
+    };
     const clampTarget = (p) => {
+      if (haunting()) {
+        p.x = Math.max(p.x, HALL.halfW - 2);
+        keepHaunted(p, 0.6);
+        return;
+      }
       p.x = clamp(p.x, -HALL.halfW + 2, HALL.halfW - 2);
       p.y = clamp(p.y, 0.5, HALL.h - 2);
       p.z = clamp(p.z, HALL.back + 2, HALL.front - 1);
@@ -1655,19 +1761,31 @@
     // Under the mezzanine the camera keeps below the deck, easing down as the Ooga walks in, so the deck's edge
     // never fills the view.
     const clampCamera = (p) => {
+      if (haunting() && p.x > HALL.halfW - 0.8) {
+        keepHaunted(p, 0.4);
+        return;
+      }
       p.x = clamp(p.x, -HALL.halfW + 0.8, HALL.halfW - 0.8);
       const under = avatar && feetOf() < 1 ? clamp((MEZZ.z1 + 1 - avatar.root.position.z) / 1.2, 0, 1) : 0;
       p.y = clamp(p.y, 0.5, under ? MEZZ.y - 0.45 + (1 - under) * (HALL.h - MEZZ.y) : HALL.h - 0.8);
       p.z = clamp(p.z, HALL.back + 0.8, HALL.front + (Math.abs(p.x) < HALL.door - 0.5 ? 3 : -0.8));
     };
     pilot = pilotMod.create({
+      // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
+      carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode && armed,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
       const o = hit.owner;
-      if (o.kind === "cabinet") return `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
+      const cabinetId = o.kind === "cabinet" ? GAMES[o.game].id : o.kind === "retro" ? AM.RETRO[o.retro].id : null;
+      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId);
+      if (occupied) return `${occupied.name} is playing · cabinet occupied`;
+      if (o.kind === "retro") return `${AM.RETRO[o.retro].name} · ${COARSE ? "tap" : "click"} to play`;
+      if (o.kind === "halloween") return o.tooltip();
+      if (o.kind === "repair") return "Clanker repairing Ooga Rally · out of order";
+      if (o.kind === "cabinet") return GAMES[o.game].unavailable ? "Ooga Rally · out of order" : `${GAMES[o.game].name} · ${COARSE ? "tap" : "click"} to play`;
       if (o.kind === "machine") return `${o.station.label} · walk up and press ${COARSE ? "PLAY" : "Space"}`;
       if (o.kind === "prizes") return `Prize counter · ${shownTickets()} tickets`;
       if (o.kind === "wheel") return `Jackpot wheel · ${AM.WHEEL_COST} tickets a spin`;
@@ -1675,15 +1793,22 @@
       return TIPS[o.kind] ? TIPS[o.kind][0] : "";
     };
     Object.assign(hooks, {
+      // Nothing through a wall or a floor: no tooltip, and no game started by a tap.
       onHover: (hit, p) => {
+        if (hit && !inView(hit)) hit = null;
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable && GAMES[hit.owner.game].id !== "cloud-hopper") BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tipFor(hit), p.x, p.y),
+      onHoverMove: (hit, p) => { if (hit && inView(hit)) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
       onTap: (hit) => {
-        if (!hit) return;
+        if (!hit || !inView(hit)) return;
         const o = hit.owner;
+        // The herald and the hunt answer a tap only from inside the arena.
+        if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
+        if (o.kind === "repair") return hud.toast("Clanker is repairing Ooga Rally · out of order");
         if (o.kind === "cabinet") return play(o.game);
+        if (o.kind === "retro") return open(AM.RETRO[o.retro].id, 0);
         if (o.kind === "machine") return open(o.station.game.kind, o.station.index);
         if (o.kind === "snack") return order();
         if (o.kind === "prizes") return openPrizes();
@@ -1694,18 +1819,31 @@
       },
       ...pilot.hooks
     });
-    hud.onPreset(pilot.goPreset);
-    hud.onAction((action) => {
+    hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
+    hud.setAreaLabel("Ooga Arcade");
+    hud.el.modeDestination.title = "Ooga Arcade · cycle stations";
+    hud.el.modeDestinationLabel.textContent = "Ooga Arcade views. Press to cycle stations";
+    const presetView = (name) => {
+      if (leaving || !VIEW_NAMES[name]) return;
+      pilot.goPreset(name);
+      hud.setDetachedView(name, true);
+    };
+    hud.onPreset(presetView);
+    hud.onAction((action, value) => {
       if (action === "leave") leaveCave();
       else if (action === "reset-view") pilot.resetCamera();
+      else if (action === "mode-preset") presetView(value);
       else if (action === "mode-retake") pilot.modeAction(action);
       else if (action === "arcade-mute") toggleMute();
+      else if (action === "ghost-exit" && ghosts) { ghosts.quit(); sendToHallway(); }
+      else if (action.startsWith("mode-")) pilot.modeAction(action);
+      else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
-    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 } });
+    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -6 }, overlayVisible: (x, y, z) => !pointHidden(x, y, z), characterOccluded: speakerHidden });
     const panel = document.getElementById("prize-panel");
     prizeUi = { panel, tickets: document.getElementById("prize-tickets"), items: [...panel.querySelectorAll(".prize")] };
     panel.hidden = true;
-    panel.addEventListener("click", onPrizeClick);
+    panel.addEventListener("click", onPrizeClick, { signal: ctx.signal });
     hud.dismissOutside(panel, closePrizes);
     addChild(root, ...BL.dressing.nodes(dressing(), { glow: 1 }));
     build();
@@ -1714,7 +1852,7 @@
     // walked in comes through the doorway. A page that opens here takes `character=`
     // instead, as the island does. With nobody named, the roster's default pick walks in, so the arcade always has
     // someone to play it.
-    const from = GAMES.findIndex((g) => g.id === ctx.from), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
+    const from = GAMES.findIndex((g) => g.id === (ctx.place === "cloud-hopper-return" ? "cloud-hopper" : ctx.from)), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
     const retroFrom = stations.find((st) => st.kind === "retro" && st.id === ctx.from) || null;
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
@@ -1723,35 +1861,65 @@
     const playerName = wantedEntry && mayPick(wantedEntry) ? wanted : contributors.activeRoster.find(mayPick)?.name || null;
     world.pilot = null;
     if (playerName) {
-      playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, useNear };
+      // The visitor's weapons and rounds are the page's (`world.weapons`), so none come back refilled at the door.
+      playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, useNear,
+        // The rifle and club work in the ghost arena alone (`arm`); there they wake the herald and fight the hunt.
+        weaponsEnabled: true, onWeaponImpact: weaponImpact, weaponInteraction,
+        onShot: (cave, from, to) => { if (ghosts && cave === people.player) ghosts.shot(from, to); },
+        shotGeometry: () => ghosts && ghosts.hunting ? ghosts.shotGeometry() : null };
       people = shared.crew = BL.crew.create(shared);
+      world.weapons = playerWorld.weapons;
+      world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
       const at = from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
-      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom ? MEZZ.y : 1), z: at.z });
+      Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
-      pilot.possess(avatar);
+      // Carry the view and record the outside loadout before parking its weapons for the visit.
+      const carried = pilot.arrive(avatar);
       if (!pilot.loginViewRestored) pilot.navigate({ position: { x: at.x, y: avatar.root.position.y - avatar.baseY, z: at.z }, yaw: at.facing - Math.PI, pitch: 0.18, dist: 4 });
-      // Empty-handed, as in Ooga Mine: no rifle on the back, no aiming, and the mine's words for the controls.
-      avatar.weapon.secondaryOwned = false;
-      people.selectWeapon(0, avatar);
-      avatar.weapon.aiming = false;
-      avatar.parts.gun.visible = false;
-      hud.hint(COARSE ? "Stick walks · PLAY at a game" : "W A S D walk · mouse or Q E turn · Space plays what is next to you", 6000);
+      // A direct arrival has no outside weapon in hand.
+      if (!carried) {
+        people.selectWeapon(0, avatar);
+        avatar.weapon.aiming = false;
+      }
+      const w = avatar.weapon;
+      outsideWeapon = { primaryOwned: w.primaryOwned, secondaryOwned: w.secondaryOwned, selectedSlot: w.selectedSlot,
+        held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0, unlimited: w.unlimited, ammo: w.ammo, spareAmmo: w.spareAmmo.slice() };
+      putWeaponsAway();
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;
     unsubscribeAccount = BL.net.subscribe(accountChanged);
-    seatCrowd(playerName);
-    // Other signed-in players in the hall, as the Oogas they drive (after the crowd, which they may stand in for).
-    remotes = BL.remotePlayers.create({ root, crew: people, hide: hideCrowd });
+    crowd = []; walkers = [];
+    // Other signed-in players keep their real Ooga or gorilla avatars; no simulated roster crowd is created.
+    remotes = BL.remotePlayers.create({ root, crew: people, fx,
+      visible: (rec) => HALL_ZONES.has(rec.zone) && !(ghosts && ghosts.down(rec.id)),
+      posed: (cave, feet) => {
+        // The shared unarmed pose keeps a club outside; Arcade parks it for every visitor.
+        if (cave.parts.club) cave.parts.club.visible = false;
+        if (cave.parts.gun && !inArenaRing(cave.root.position.x, cave.root.position.z, feet)) cave.parts.gun.visible = false;
+      }
+    });
+    // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
+    // wakes it and its code loads, kept in step with the others in the arena through the room (`ghostChannel`).
+    zoneNow = "arcade.hall"; zoneHeld = 0; armed = false; hallwayFar = false; hallwayAlong = 0; huntHearing = 0;
+    exitButton = document.getElementById("ghost-exit");
+    exitButton.hidden = true;
+    ghostChannel = BL.ghostEntry.channel();
+    ghostEntry = BL.ghostEntry.create({ root, camera, npcSync: ghostChannel, addTarget, removeTarget, hud, fx, attach: attachHunt,
+      heraldAt: (now) => heraldAt(now, ARENA.x, HAUNT.y, ARENA.z), heraldHeight: HERALD_HEIGHT, tapWakes: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     hireCrew();
-    hangFame(playerName);
+    hangFame();
+    for (const kind of BL.game.ARCADE_KINDS) if (kind !== "hockey") scoreSubscriptions.push(BL.highscores.watch(kind, () => refreshScores(kind)));
     showShelf();
     // The hall's sound, and from the island the room powers up.
+    const hockeyGames = carnival.filter(g => g.kind === "hockey");
+    unwatchHockey = BL.hockeySession.watch(hockeyGames);
+    hockeyPlayers = BL.hockeyPlayers.create({ root, games: hockeyGames, body: id => id === BL.net.state.selfId ? people.player : remotes.body(id) });
     audio = BL.carnivalAudio.create();
     audio.room(true);
     powerT = from < 0 && !machineFrom && !retroFrom ? 0 : 99;
@@ -1767,11 +1935,9 @@
       fx.burst(LAYOUT.wheel.x, LAYOUT.wheel.y, LAYOUT.wheel.z + 0.4, 40, SPARKS, 2.8);
       hud.toast(`+${won} tickets! ${tickets} on the board. Ooga rich!`);
       roomCheers();
-      hostSays("More tickets! Ooga rich!", true);
     }
     // Back at a machine: it holds its call for a while, and flashes and throws embers if it paid tickets.
     invited = null;
-    callT = 0;
     const back = machineFrom ? life.find((s) => s.station === machineFrom) : null;
     if (back) {
       back.cool = COOL;
@@ -1779,6 +1945,7 @@
     }
     lightUp();
     leaving = openingGame = false;
+    captureOnArrival = true;
     shownFrame = -1;
     prompt = null;
     orders = 0;
@@ -1788,76 +1955,79 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, blocks, audio, staff, life, get frame() { return shownFrame; } }
+      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
+      // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
+      get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
+      get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
     };
-  };
-
-  // The crowd, from part rotations alone: allocation-free. Each pose is a loop on the
-  // Ooga's own clock `t`, so no two play in step.
-  const tri = (p) => Math.abs(p - Math.floor(p + 0.5)) * 2;
-  const animateCrowd = (dt, elapsed) => {
-    for (let i = 0; i < crowd.length; i++) {
-      const m = crowd[i], P = m.cave.parts, t = (m.t += dt);
-      let armR = 0, armL = 0, head = 0, sway = 0;
-      if (m.pose === "claw" || m.pose === "pinball") {
-        armR = -1.05 + Math.sin(t * 8) * 0.07;
-        armL = m.pose === "pinball" ? -1.05 - Math.max(0, Math.sin(t * 6.5)) * 0.25 : -1.1 + Math.sin(t * 5 + 1) * 0.12;
-        head = 0.25 + Math.sin(t * 1.3) * 0.05;
-      } else if (m.pose === "hockey") {
-        armL = -0.85 + Math.sin(t * 4.6) * 0.3;
-        armR = -0.3;
-        head = 0.35;
-        sway = Math.sin(t * 2.3) * 0.2;
-      } else if (m.pose === "skee") {
-        // Swung by its game: back, then through to the release, when the machine takes its roll.
-        const k = m.swing;
-        armL = k > 0.6 ? (1 - k) / 0.4 * 0.8 : k > 0 ? 0.8 - (0.6 - k) / 0.6 * 2.2 : -0.1;
-        armR = -0.3;
-        head = 0.1;
-      } else if (m.pose === "shoot") {
-        const up = m.swing > 0 ? Math.sin(m.swing * Math.PI) : 0;
-        armR = armL = -0.6 - up * 2.1;
-        head = -0.25 * up;
-      } else if (m.pose === "sit") {
-        armL = -1.2 - Math.max(0, Math.sin(t * 1.8)) * 0.9;
-        armR = -0.9;
-        head = 0.1 + Math.sin(t * 1.8) * 0.08;
-      } else if (m.pose === "queue") {
-        P.head.rotation.y = Math.sin(t * 0.6) * 0.5;
-        armR = armL = Math.sin(t * 1.1) * 0.1;
-      } else {
-        const up = Math.max(0, Math.sin(t * 1.6)) ** 3;
-        armR = armL = -2.8 * up;
-        head = -0.3;
-      }
-      m.swing = Math.max(0, m.swing - dt * 1.6);
-      m.wave = Math.max(0, m.wave - dt);
-      m.cheer = Math.max(0, m.cheer - dt);
-      if ((cheerT > 0 || m.cheer > 0) && m.pose !== "sit") armR = armL = -2.4 - Math.abs(Math.sin(t * 7)) * 0.4;
-      else if (m.wave > 0) armL = -2.6 + Math.sin(t * 12) * 0.3;
-      P.armR.rotation.x = armR;
-      P.armL.rotation.x = armL;
-      P.head.rotation.x = head;
-      m.cave.root.rotation.y = m.facing + sway;
-    }
   };
 
   // Per frame, allocation-free: the walker and camera, the screens' loops, the carnival, the staff, the prompt at a
   // station, the lamps nearest the view, and the way out.
+  let prefetchAt = 0;
   const update = (dt, elapsed) => {
-    pilot.readInput(dt);
+    if (queuedCabinet) { const id = queuedCabinet; queuedCabinet = null; open(id); }
+    // A scene handoff restores soft mouse-look only. Capture once when the hall
+    // is playable again, after the cabinet's return zoom; Escape stays released.
+    if (captureOnArrival && !leaving && !cabinetView.active) {
+      captureOnArrival = false;
+      pilot.focusAim(true);
+    }
+    if (ghosts) ghosts.unshake(camera);
+    if (repair) {
+      // One fixed work pose, with short turns separated by a pause. No pathfinding, effects pool or new geometry.
+      const turn = Math.max(0, Math.sin(elapsed * 1.6));
+      repair.driver.rotation.z = Math.sin(elapsed * 8) * 0.45 * turn;
+      repair.clanker.parts.armR.rotation.z = Math.sin(elapsed * 8) * 0.025 * turn;
+      repair.clanker.parts.head.rotation.y = Math.sin(elapsed * 0.7) * 0.035;
+    }
+    if (elapsed >= prefetchAt) {
+      prefetchAt = elapsed + 0.25;
+      const p = pilot.player ? pilot.player.root.position : camera.position;
+      for (let i = 0; i < live.length; i++) {
+        const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+        if (GAMES[c.game] && !GAMES[c.game].unavailable && GAMES[c.game].id !== "cloud-hopper" && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+      }
+    }
+    if (!leaving) pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people && people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
-    if (drivenHere) {
-      const p = drivenHere.root.position;
-      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y);
-      BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
-    }
+    if (drivenHere) BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     remotes.update(dt);
     footsteps.update(drivenHere);
+    // The ghost arena: the rifle in hand inside it, and the voice zone it reports (Ghost Hunter's Arena, a hunt on or
+    // not), held a quarter second before it changes.
+    const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
+    const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
+    if (inRing !== armed && avatar) arm(inRing);
+    // Arena entry/exit changes the held weapon after the pilot's pose; publish the final loadout.
+    if (drivenHere) {
+      const p = drivenHere.root.position;
+      BL.net.sendPose(p.x, p.y - drivenHere.baseY, p.z, drivenHere.root.rotation.y, null, 0, BL.crew.weaponFlags(drivenHere), BL.crew.visualState(drivenHere));
+    }
+    // The hallway joins Ooga Arcade to Ghost Hunter's Arena (#422), a voice group of its own: each half is a zone of the
+    // land it leads to (`arcade.haunt`, `ghost-arena.haunt`), so the room hands both the hunt and a spectator there
+    // watches it through the fence. The half flips `HALLWAY_HOLD` past the midpoint, so a step there never flickers.
+    const inHallway = !inRing && !!drivenHere && feet > HAUNT.y - 1 && inHaunt(drivenHere.root.position.x, drivenHere.root.position.z);
+    hallwayAlong = inHallway ? clamp((drivenHere.root.position.x - HALL.halfW) / (HAUNT.end - HALL.halfW), 0, 1) : inRing ? 1 : 0;
+    hallwayFar = inHallway ? hallwayAlong > 0.5 + (hallwayFar ? -HALLWAY_HOLD : HALLWAY_HOLD) : inRing;
+    const zone = inRing ? "ghost-arena" : inHallway ? hallwayFar ? "ghost-arena.haunt" : "arcade.haunt" : "arcade.hall";
+    if (zone === zoneNow) zoneHeld = 0;
+    else if ((zoneHeld += dt) >= 0.25) { zoneNow = zone; zoneHeld = 0; BL.net.setZone(zoneNow); }
+    // Along the hallway voices cross between the two by how far along the driven Ooga stands (voice-blend.js), each end
+    // its own land's alone; and the hunt's music and sound reach a spectator there by the arena's equal-power share of
+    // the same walk, full in the arena and nothing in the hall.
+    const reported = BL.voiceBlend.place(zoneNow);
+    if (inHallway && reported === "arcade") BL.net.setBlend("ghost-arena", hallwayAlong);
+    else if (inHallway && reported === "ghost-arena") BL.net.setBlend("arcade", 1 - hallwayAlong);
+    else BL.net.setBlend(null, 0);
+    huntHearing = inRing ? 1 : inHallway ? BL.voiceBlend.weight("ghost-arena", "arcade", "ghost-arena", hallwayAlong) : 0;
+    // Exit hunt shows while this visitor hunts in the arena.
+    const hunter = armed && !!ghosts && ghosts.inHunt;
+    if (exitButton.hidden === hunter) exitButton.hidden = !hunter;
     // The loop, then PRESS START blinking, then the loop again; the best line shows with the loop.
     const frame = Math.floor(elapsed * FPS) % (FRAMES + AM.START_FRAMES);
     if (frame !== shownFrame) {
@@ -1870,6 +2040,8 @@
       }
     }
     for (let i = 0; i < carnival.length; i++) carnival[i].update(dt);
+    if (unwatchHockey) unwatchHockey.update(dt);
+    if (hockeyPlayers) hockeyPlayers.update(dt);
     stationLife(dt, elapsed);
     // The wheel: a spin eases out on its cubic to the drawn wedge and shows its win; its result holds under the
     // clapper a while; else the face idles round, a push from the gamemaster easing back.
@@ -1891,60 +2063,115 @@
     const peg = Math.floor(-spin.face.rotation.z / (Math.PI * 2 / AM.WHEEL_VALUES.length)), spinning = spin.t >= 0, flashing = spin.party > 0 || spin.flash > 0;
     if (peg !== wheelTick) { wheelTick = peg; hear(LAYOUT.wheel.x, LAYOUT.wheel.z, "click", spinning ? 1.2 : spin.speed > 1 ? 0.8 : 0.35, spinning ? 1.45 - 0.75 * Math.min(1, spin.speed / 12) : 1); }
     for (let i = 0; i < spin.bulbs.length; i++) spin.bulbs[i].glow = spinning ? (wheelTick % 3 === i ? 1.8 : 0.3) : flashing ? (Math.floor(elapsed * 12) & 1 ? 1.4 : 0.35) : 1;
-    animateCrowd(dt, elapsed);
-    playBots(dt);
-    walk(dt, elapsed);
-    greet(dt);
+    cheerT = Math.max(0, cheerT - dt);
     lights(dt, elapsed);
     crewUpdate(dt);
+    // The close camera passes through visitors and staff near the cabinet. Hide their local rendering after
+    // their pose updates, preserving both simulation and shared presence; the hall restores them on return.
+    const cabinetPhase = cabinetView.phase, cabinetCamera = cabinetPhase === "approach" || cabinetPhase === "loading" || cabinetPhase === "return";
+    if (cabinetCamera) {
+      hideCabinetActor((pilot.player || avatar)?.root);
+      if (people) for (const cave of people.cavemen.values()) hideCabinetActor(cave.root);
+      for (const g of staff) hideCabinetActor(g.agent.root);
+      for (const actor of remotes.actors()) hideCabinetActor(remotes.body(actor.id)?.root);
+      if (repair) hideCabinetActor(repair.clanker.root, repair.cabinet);
+    } else if (cabinetHidden.size) revealCabinetPlayers();
     ambience(dt);
     audio.tick(dt);
     if (pilot.player && !leaving) {
-      const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE);
-      if (near !== prompt) {
-        prompt = near;
+      const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE, true);
+      const cabinetId = near?.kind === "cabinet" ? GAMES[near.game].id : near?.kind === "retro" ? near.id : null;
+      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId);
+      if (near !== prompt || occupied !== promptOccupied) {
+        prompt = near; promptOccupied = occupied;
         if (near) {
           const verb = near.kind === "snack" ? "order at " : near.kind === "prizes" ? "shop at " : "", act = near.kind === "snack" ? "ORDER" : near.kind === "prizes" ? "PRIZES" : near.kind === "wheel" ? "SPIN" : "PLAY";
-          hud.hint(near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
+          hud.hint(occupied ? `${near.label} · ${occupied.name} is playing` : near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
           hud.setAct(act);
-        } else pilot.showAct();
+        } else { hud.hideHint(); pilot.showAct(); }
       }
       if (p.z > EXIT_Z + 1.2 && Math.abs(p.x) < HALL.door) leaveCave();
     }
+    ghostChannel.update(dt);
+    if (ghosts) { ghosts.update(dt); tess.update(dt, elapsed); }
+    else ghostEntry.update(dt);
+    fenceK = clamp(fenceK + clamp((gameMode ? 1 : 0) - fenceK, -dt / FENCE_S, dt / FENCE_S), 0, 1);
+    fence.visible = fenceK > 0;
+    fence.position.y = HAUNT.y - AM.IRON_FENCE.h * (1 - fenceK);
     glowNear(elapsed);
+    if (hauntLit) { lightTotems(elapsed); shineLasers(elapsed); }
     stepTweens(dt);
     fx.update(dt, elapsed);
+    if (ghosts) ghosts.shake(camera);
   };
   const TAP_SOUNDS = { door: "knock", changer: "coin", muncher: "spit", wheel: "click", disco: "ding", fame: "ding", off: "ding", sign: "grunt" };
-  const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
+  const drawExtra = (ctx2d, project) => {
+    remotes.drawNames(ctx2d, project);
+    if (hockeyPlayers) hockeyPlayers.draw(ctx2d, project);
+    if (ghosts) ghosts.drawOverlay(ctx2d, project);
+  };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    captureOnArrival = false;
+    revealCabinetPlayers();
+    openingRequest++;
+    if (!openingGame) BL.net.leaveCabinet();
     // Whoever walked in goes on as themselves: into a game, or back out to the island at this mouth.
     const traveller = pilot.player || openingGame && avatar;
     world.pilotDetached = !traveller;
     world.pilot = traveller ? traveller.traits.name : null;
     unsubscribeAccount();
     unsubscribeAccount = null;
-    BL.net.setBody(null);
+    for (const unsubscribe of scoreSubscriptions) unsubscribe();
+    scoreSubscriptions.length = 0;
+    BL.net.setBody(null); BL.net.setBlend(null, 0);
+    huntHearing = 0;
+    // HALLOWEEN: the hunt and its herald let go of (combat off, the view and the Ooga given back), the rifle put away.
+    if (ghosts) { ghosts.dispose(); tess.dispose(); }
+    ghostEntry.dispose();
+    ghostChannel.dispose();
+    setGameMode(false);
+    if (armed) arm(false);
+    if (avatar && outsideWeapon) {
+      const w = avatar.weapon;
+      w.primaryOwned = outsideWeapon.primaryOwned; w.secondaryOwned = outsideWeapon.secondaryOwned;
+      w.unlimited = outsideWeapon.unlimited;
+      // Arena swaps and knockout drops belong to the borrowed rifle, not the parked mainland magazines.
+      // Combat cleanup above returns the drops before these original counts are restored.
+      w.ammo = outsideWeapon.ammo;
+      w.spareAmmo.splice(0, w.spareAmmo.length, ...outsideWeapon.spareAmmo);
+      people.selectWeapon(outsideWeapon.held, avatar);
+      w.selectedSlot = outsideWeapon.selectedSlot;
+      outsideWeapon = null;
+    }
+    document.body.classList.remove("game-mode");
+    exitButton.hidden = true;
+    ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
+    totemsAt = [];
+    totemLife = [];
+    lasers = [];
     prizeUi.panel.removeEventListener("click", onPrizeClick);
     prizeUi.panel.hidden = true;
-    window.removeEventListener("keydown", armsKeys, true);
-    canvasEl.removeEventListener("pointerdown", rightClick, true);
-    canvasEl = null;
     for (const g of staff) g.agent.dispose();
+    repair?.clanker.dispose(); repair = null;
     for (const id in JOBS) JOBS[id].spots.length = 0;
     CAND.fill(null);
     // A spin still turning has its win saved but not shown: left out here, it shows on the way back in (`enter`).
     lastTickets = shownTickets();
+    if (unwatchHockey) unwatchHockey.dispose();
+    unwatchHockey = null;
+    if (hockeyPlayers) hockeyPlayers.dispose();
+    hockeyPlayers = null;
     audio.dispose();
     remotes.dispose();
     remotes = null;
     footsteps.dispose();
     footsteps = null;
+    // Remember the restored outside loadout before disposing the crew clears its player.
+    pilot.dispose();
     if (people) people.dispose();
     fx.dispose();
-    pilot.dispose();
     for (const node of targets) input.remove(node);
     targets.length = 0;
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
@@ -1970,8 +2197,12 @@
     for (let d = 0; d < 10; d++) set.add(AM.digit(d));
     set.add(AM.coconut(0)).add(AM.coconut(1)).add(AM.pinLight(0)).add(AM.pinLight(1));
     if (staff) for (const g of staff) g.agent.liveGeometry(set);
+    if (repair) repair.clanker.liveGeometry(set);
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
+    if (hockeyPlayers) hockeyPlayers.liveGeometry(set);
+    if (ghosts) { ghosts.liveGeometry(set); tess.liveGeometry(set); }
+    else if (ghostEntry) ghostEntry.liveGeometry(set);
   };
   const stats = () => {
     let nodes = 0;
@@ -1980,16 +2211,18 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}) };
   };
 
-  const arcadeScene = {
+  const arcadeScene = BL.deferred.scene("arcade", {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
-    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
-      return false;
+      return !!(ghosts && ghosts.inMotion);
     }
-  };
+  });
   arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
+  arcadeScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon"]); help.title = "Ooga Arcade · " + help.title; return help; };
+  arcadeScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.arcade = arcadeScene;
 })();

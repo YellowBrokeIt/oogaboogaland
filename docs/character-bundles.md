@@ -1,14 +1,15 @@
 # Character submission bundles
 
-GitHub Actions keeps two PRs open against `rock`:
+GitHub Actions keeps three PRs open against `rock`:
 
 | PR | Changes | Merge |
 |---|---|---|
 | Daily character updates | Bounded literal character data in the documented wrapper | First successful run at/after the following midnight UTC |
 | Character updates · maintainer review required | Custom code that passes the preliminary screen and ownership checks | w-s-bitcoin or 2140data approves the current head, then an authorized human merges |
+| Character display names · maintainer review required | Operator-submitted display names matching the existing GitHub owner; all other bytes unchanged | Same exact-head approval and manual merge as custom code |
 
-The automation never merges the manual lane. A queued update invalidates old
-approval; operator requests for changes block either lane. After either PR
+The automation never merges the manual or rename lanes. A queued update invalidates old
+approval; operator requests for changes block every lane. After a PR
 merges, its replacement opens. An idle PR has a small
 `.github/character-bundles/<lane>.json` manifest as its only change, since GitHub
 cannot open a PR with an identical tree. Valid empty bundles pass identity
@@ -39,7 +40,7 @@ submitted code with credentials present. Other files in mixed PRs are not bundle
 or declared safe by this scanner; they retain normal code review.
 
 Accepted character-only PRs receive comments linking their destination bundles
-and close only after both lanes save their changes. Mixed PRs retain their other
+and close only after the destination lanes save their changes. Mixed PRs retain their other
 work and receive the same links. **Character intake** stays failing until the
 contributor restores the copied character paths to the PR base. The bot does not
 rewrite contributor branches, including forks. Preserve original commits when
@@ -48,6 +49,22 @@ New edits supersede older queued versions of that source PR. Competing PRs for t
 same character require reconciliation instead of silently overwriting one another.
 A file enters one lane: any revision needing manual review sends the whole file
 there. Moving an already queued file between lanes requires maintainer repair.
+
+An operator with Maintain/Admin permission can submit a cosmetic GitHub-name
+update independently of pending custom characters. Every revision must change
+only the literal `display` line immediately after the literal `handle` line,
+using the same indentation, LF line endings and a trailing comma. Its new value
+must exactly match the existing `github` (or `handle` when `github` is absent).
+The stable handle, owner, appearance, dates, hooks and all other bytes stay intact.
+New characters, code edits, identity changes and ordinary contributor submissions
+keep their existing lanes. The rename bundle still needs current-head operator
+approval and is never automatically merged.
+
+An identical rename previously queued in the manual bundle can move to this lane
+when its author, base blob and complete file hash match. The bot restores only
+that file in the manual bundle and moves its provenance to the rename bundle;
+other queued files and their held reviews stay in place. Any conflicting revision
+fails closed instead of replacing another submission.
 
 Policy findings close the offending PR with an explanation and a correction/review
 path. They do not establish malicious intent. Timeouts, rate limits, truncated
@@ -182,13 +199,22 @@ Setup uses an owner-approved GitHub App registration and GitHub CLI/API:
    Repository administrators retain the ability to change repository settings;
    keep that administrative access restricted separately.
 5. Set `CHARACTER_BUNDLES_ENABLED=true` and dispatch **Character bundles** on
-   `rock` as an operator. Verify both placeholders, App-signed heads and passing
+   `rock` as an operator. Verify all three placeholders, App-signed heads and passing
    revalidation. An empty bundle must remain blocked from merging.
 
 Disabling `CHARACTER_BUNDLES_ENABLED` stops bundle operations while preserving
 open PRs and provenance. It does not disable the required checks. Existing
 submissions remain blocked until an operator restores the coordinator or
 intentionally changes repository rules. No workflow approves a manual bundle.
+
+For an actual GitHub account rename, the separate [verified account migration
+path](account-rename-operator-path.md) accepts only a signed operator PR changing
+the pinned account's literal `github` line after fresh numeric-ID verification.
+It retains the source PR and passes once its exact head is verified, without a
+second operator's approval; it is not the cosmetic display-name lane and never
+automatically merges. When ordinary bundles are paused,
+`CHARACTER_ACCOUNT_RENAMES_ENABLED=true` keeps only these verification checks
+running, without bundle or page mutations.
 
 GitHub references: [workflow triggering](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow),
 [branch protection](https://docs.github.com/en/rest/branches/branch-protection),
@@ -201,6 +227,6 @@ appearance ownership, UTC cutoffs, empty placeholders, operator IDs, stale and
 dismissed reviews, manual PR replacement and post-merge dispatch recovery.
 Run `npm --prefix worker test`, `npm run test:unit`, `npm run build` and syntax
 checks when the maintainer requests verification. Operational rollout must also
-verify that both live placeholder PRs open and remain unmergeable while empty.
+verify that all three live placeholder PRs open and remain unmergeable while empty.
 A scanner does not establish that arbitrary custom code is safe; the manual lane
 always retains a human review and merge requirement.

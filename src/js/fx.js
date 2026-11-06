@@ -58,7 +58,7 @@
   };
   // `text` is one row, or a beat's rows with `tw` the widest; `more` widens the bubble for the arrow, and `bob` lifts
   // it a pixel.
-  const drawBubble = (ctx, text, x, y, alpha, topSpace = 0, tw, more = false, bob = 0) => {
+  const drawBubble = (ctx, text, x, y, alpha, tw, more = false, bob = 0) => {
     ctx.globalAlpha = alpha;
     ctx.font = "bold 10px ui-monospace, monospace";
     if (tw === undefined) tw = ctx.measureText(text).width;
@@ -67,7 +67,7 @@
     const bw = Math.ceil((tw + 28 + (more ? MORE_W : 0)) / px) * px;
     const bh = 11 * px + (rows - 1) * ROW_H;
     const bx = Math.round(Math.max(8, Math.min(window.innerWidth - bw - 8, x - bw / 2)) / px) * px;
-    const by = Math.round(Math.max(8 + topSpace, Math.min(window.innerHeight - bh - 14, y - bh - 14)) / px) * px;
+    const by = Math.round(Math.max(8, Math.min(window.innerHeight - bh - 14, y - bh - 14)) / px) * px;
     const tx = Math.round(Math.max(bx + 2 * px, Math.min(bx + bw - 2 * px, x)) / px) * px;
     const bg = "rgba(18,18,18,0.95)";
     ctx.fillStyle = bg;
@@ -96,9 +96,9 @@
       ctx.fillRect(ax + 3, ay + 3, 1, 1);
     }
     ctx.globalAlpha = 1;
-    return by;
+    return by + bh + 2 * px;
   };
-  const create = ({ root, renderer, camera, overlay, tickerAt, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
+  const create = ({ root, renderer, camera, overlay, tickerAt, tickerVisible = null, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
     const overlayCtx = overlay.getContext("2d");
     const visibility = BL.characterVisibility.create({ root, renderer, camera, occluded: characterOccluded, renderOpts });
     const speechScreen = { x: 0, y: 0 };
@@ -292,6 +292,7 @@
       return { canvas, w, h };
     };
     const showTicker = (text, dur) => {
+      if (tickerVisible && !tickerVisible()) { ticker = null; return; }
       ticker = { text, t: 0, dur, image: null, dpr: 0 };
     };
     let overlayW = 0, overlayH = 0, overlayDpr = 1;
@@ -311,9 +312,11 @@
       }
       paintSpeech(ctx, text, x, y, alpha, cave, tw, more, bob);
     };
+    // A speaker with a nameplate of its own over the head (remote-players.js) lifts its bubble by `speechLift` pixels.
     const paintSpeech = (ctx, text, x, y, alpha, cave, tw, more, bob) => {
-      const top = drawBubble(ctx, text, x, y, alpha, hud ? hud.tooltip.speechSpace(cave) : 0, tw, more, bob);
-      if (hud) hud.tooltip.aboveSpeech(cave, top, alpha);
+      const space = (hud ? hud.tooltip.speechSpace(cave) : 0) + (cave && cave.speechLift || 0);
+      const bottom = drawBubble(ctx, text, x, y - space, alpha, tw, more, bob);
+      if (hud) hud.tooltip.belowSpeech(cave, bottom);
     };
     // drawExtra paints between the bubbles and the ticker.
     const drawOverlay = (dt, drawExtra) => {
@@ -361,7 +364,7 @@
           continue;
         }
         const y = p.y + p.t * 0.45;
-        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z)) continue;
+        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z, p)) continue;
         const pos = project(p.x, y, p.z);
         if (!pos) continue;
         ctx.globalAlpha = (1 - p.t / 2.4) * 0.8;
@@ -391,6 +394,9 @@
       }
       drawExtra(ctx, project, drawSpeech);
       if (hud) hud.tooltip.update();
+      // Drop an earlier notice when a scene hides its ticker; it must not
+      // linger over the game or reappear when the visitor leaves it.
+      if (ticker && tickerVisible && !tickerVisible()) ticker = null;
       if (ticker) {
         ticker.t += dt;
         if (ticker.t > ticker.dur) ticker = null;
@@ -418,10 +424,8 @@
       }
       trimPool();
     };
-    const dispose = () => {
-      sizeObserver.disconnect();
-      if (hud) hud.tooltip.setVisibility(null);
-      visibility.dispose();
+    // A parked scene keeps its sight cache and observer, but none of its transient effects.
+    const reset = () => {
       for (const p of particles) removeChild(root, p.node);
       for (const p of particlePool) removeChild(root, p.node);
       particles.length = 0;
@@ -432,9 +436,15 @@
       damageCursor = damageCount = 0;
       ticker = null;
     };
+    const dispose = () => {
+      sizeObserver.disconnect();
+      if (hud) hud.tooltip.setVisibility(null);
+      visibility.dispose();
+      reset();
+    };
     const stats = () => ({ particles: particles.length, pool: particlePool.length, bubbles: bubbles.length, zzz: zzz.length, damageNumbers: damageCount });
     return {
-      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, dispose, stats,
+      spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, reset, dispose, stats,
       get inMotion() {
         return particles.length > 0 || damageCount > 0;
       }

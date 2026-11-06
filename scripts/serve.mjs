@@ -1,16 +1,18 @@
 // Builds and stages the site (scripts/site.mjs into untracked/site) and serves it locally; --watch rebuilds
-// on every change under src/. Everything outside `/src/` is the staged site as GitHub Pages serves it, so
+// on every change under src/, staging beside the site and swapping it in whole, so a page open meanwhile never
+// finds a file gone and a failed build leaves the last good site in place. Everything outside `/src/` uses Worker-style audio and picture assets, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
+import { previewResponse } from "./preview-response.mjs";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync, watch } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const build = join(root, "scripts", "site.mjs");
-const site = join(root, "untracked", "site");
+const site = join(root, "untracked", "site"), next = `${site}-next`, old = `${site}-old`;
 const src = join(root, "src");
 const watching = process.argv.includes("--watch");
 const port = Number(process.env.PORT) || 8080;
@@ -26,8 +28,13 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+  ".mp3": "audio/mpeg",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".vtt": "text/vtt; charset=utf-8",
   ".ico": "image/x-icon",
 };
 
@@ -41,10 +48,19 @@ function rebuild() {
   }
   building = new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [build], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, [build, next, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
     child.on("exit", (code) => {
-      if (code !== 0) console.log(`build failed (exit ${code}); serving the previous page`);
-      else console.log(`rebuilt in ${Date.now() - started} ms`);
+      if (code !== 0) {
+        rmSync(next, { recursive: true, force: true });
+        console.log(`build failed (exit ${code}); serving the previous page`);
+      } else {
+        // Two renames, so the site is missing only between them, not for the whole build.
+        rmSync(old, { recursive: true, force: true });
+        if (existsSync(site)) renameSync(site, old);
+        renameSync(next, site);
+        rmSync(old, { recursive: true, force: true });
+        console.log(`rebuilt in ${Date.now() - started} ms`);
+      }
       building = null;
       if (queued) {
         queued = false;
@@ -65,9 +81,25 @@ function send(res, status, body, type) {
   res.end(body);
 }
 
-function serveFile(res, path) {
-  if (!existsSync(path) || !statSync(path).isFile()) return send(res, 404, "not found");
-  send(res, 200, readFileSync(path), TYPES[extname(path)] || "application/octet-stream");
+// A rebuild swaps the site in, so a file can be gone between the check and the read: that is a 404, never a crash.
+function readOrNull(path) {
+  try {
+    return statSync(path).isFile() ? readFileSync(path) : null;
+  } catch {
+    return null;
+  }
+}
+
+function respond(req, res, path, body) {
+  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  res.writeHead(response.status, response.headers);
+  res.end(response.body);
+}
+
+function serveFile(req, res, path) {
+  const body = readOrNull(path);
+  if (!body) return send(res, 404, "not found");
+  respond(req, res, path, body);
 }
 
 const server = createServer((req, res) => {
@@ -78,18 +110,23 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/") return serveFile(res, join(site, "index.html"));
-  if (pathname === "/src" || pathname === "/src/") return serveFile(res, join(src, "index.html"));
+  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.
     const file = normalize(join(src, pathname.slice("/src/".length)));
     if (!file.startsWith(src + sep)) return send(res, 403, "forbidden");
-    return serveFile(res, file);
+    return serveFile(req, res, file);
   }
   const file = normalize(join(site, pathname));
   if (!file.startsWith(site + sep)) return send(res, 403, "forbidden");
-  for (const candidate of [file, `${file}.html`]) if (existsSync(candidate) && statSync(candidate).isFile()) return serveFile(res, candidate);
-  send(res, 404, readFileSync(join(site, "404.html")), TYPES[".html"]);
+  for (const candidate of [file, `${file}.html`]) {
+    const body = readOrNull(candidate);
+    if (body) return respond(req, res, candidate, body);
+  }
+  const missing = readOrNull(join(site, "404.html"));
+  if (missing) send(res, 404, missing, TYPES[".html"]);
+  else send(res, 404, "not found");
 });
 
 await rebuild();
@@ -102,7 +139,11 @@ server.listen(port, host, () => {
   console.log(`serving http://${host}:${port}/ (the staged site; try /rally) and http://${host}:${port}/src/ (sources)`);
   if (!watching) return;
   let timer = null;
+  // The build writes the cast's generated file itself (scripts/characters.mjs); watching it would rebuild forever.
+  // A change to the cast is a change under src/characters/, which is watched.
+  const generated = join("js", "characters.gen.js");
   watch(src, { recursive: true }, (_, file) => {
+    if (file === generated) return;
     if (file) console.log(`changed ${file}`);
     clearTimeout(timer);
     timer = setTimeout(rebuild, 100);

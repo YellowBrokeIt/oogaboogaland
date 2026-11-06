@@ -12,7 +12,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -123,12 +123,13 @@
     "?": ["111", "001", "011", "000", "010"],
     "+": ["000", "010", "111", "010", "000"],
     "-": ["000", "000", "111", "000", "000"],
-    ".": ["000", "000", "000", "000", "010"]
+    ".": ["000", "000", "000", "000", "010"],
+    "'": ["010", "010", "000", "000", "000"]
   };
   // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
   const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
   const SIGN_CELL = 0.075, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
-  const SIGN_CACHE = new Map();
+  const SIGN_CACHE = BL.models.scopedMap();
   // The emblem each cave flies, 5 by 7: on its sign either side of the name and on its banners.
   const SIGN_ICONS = {
     bolt: ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."],
@@ -150,6 +151,9 @@
     joystick: { ink: { "R": "#e0452b", "+": "#ff9c86", "H": "#efe6d2", "#": "#c9ced6" }, rows: ["..+RR..", "..RRR..", "...H...", "...H...", "...H...", "#######", ".#####."] },
     chute: { ink: { "#": "#e0452b", "+": "#f2efe8", "L": "#f2efe8", "S": "#f5d142" }, rows: ["..###..", ".#+#+#.", "#+#+#+#", "L.....L", ".L...L.", "..LSL..", "...S..."] },
     rocket: { ink: { "#": "#f2efe8", "R": "#e0452b", "W": "#7fe0ff", "F": "#ffb02e" }, rows: ["...R...", "..RRR..", "..#W#..", "..###..", ".R###R.", "R.#F#.R", "...F..."] },
+    cloud: { ink: { "#": "#f2efe8", "+": "#ffffff", "S": "#a9d7ef" }, rows: [".......", "..++...", ".++++..", "++##+++", "+######", ".SSSSS.", "......."] },
+    // Ghost Hunter: the hunt's white ghost, its eyes and mouth dark.
+    ghost: { ink: { "#": "#f2efe8", "+": "#ffffff", "*": "#1b1b1e" }, rows: ["..+++..", ".+####.", "+#*#*##", "+######", "+##*###", "+######", "#.#.#.#"] },
     // B.C.A.: a walnut abacus whose beads are bananas and ivory, on brass rods.
     abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] }
   };
@@ -271,7 +275,7 @@
   };
   // A small name board on two chunky pegs, for the Drop and Orbit launch sites and the Mempool island: the cave
   // sign scaled down, its bottom `peg` above the ground. `signWidth` and `signHeight` are its scaled size.
-  const POST_SIGNS = new Map();
+  const POST_SIGNS = BL.models.scopedMap();
   const postSign = (text, scale, peg) => {
     const key = `${text}|${scale}|${peg}`;
     let geo = POST_SIGNS.get(key);
@@ -451,6 +455,90 @@
     box({ w: 0.44, h: 0.44, d: 0.44, color: WOOD, offset: { x: -0.7, y: 0.32, z: 0.02 } }),
     box({ w: 0.24, h: 0.3, d: 0.24, color: "#d8892b", offset: { x: 0.2, y: 0.25, z: 0.06 } }),
     box({ w: 0.24, h: 0.2, d: 0.24, color: "#6f9fca", offset: { x: 0.65, y: 0.2, z: 0.02 } })
+  ));
+  // The Library of Bitcoin fills a shallow cut left of the Timechain stairs. Five compact rows of books and
+  // parchment rolls sit in divided timber bays, close enough to browse from the threshold. Local +z leads out
+  // of the mouth, y = 0 on the cut floor. The cut is 5.4 m wide, 0.78 m deep and 3.3 m high.
+  const LIBRARY_SHELF_Y = [0.25, 0.79, 1.33, 1.87, 2.41];
+  const LIBRARY_BOOK_INKS = [
+    ["#d9a441", "#b5792e", "#8a5a2a", "#e3b559", "#a86b2c", "#c48a35"],
+    ["#8d563c", "#a86b42", "#6d4437", "#c18b58", "#885336", "#b47748"],
+    ["#5d8fc4", "#3f6fa8", "#7fb0d6", "#2f4f74", "#4f8f9a", "#86a9c9"],
+    ["#637a58", "#7f9569", "#4a634c", "#9aa176", "#61755e", "#a4aa82"],
+    ["#e8e2d2", "#cfc8b4", "#b7ae98", "#f1ece0", "#9a927e", "#d8cfb6"]
+  ];
+  const libraryNook = cached(() => {
+    const rand = mulberry32(4181), stone = ["#4a4640", "#3a3734", "#57514a"], parts = [
+      box({ w: 5.34, h: 0.06, d: 0.72, color: stone[0], offset: { y: 0.03, z: -0.33 } }),
+      box({ w: 5.65, h: 0.1, d: 0.32, color: stone[1], offset: { y: 0.05, z: 0.03 } }),
+      box({ w: 0.14, h: 2.87, d: 0.34, color: stone[1], offset: { x: -2.595, y: 1.435, z: -0.03 } }),
+      box({ w: 0.14, h: 2.87, d: 0.34, color: stone[1], offset: { x: 2.595, y: 1.435, z: -0.03 } }),
+      box({ w: 5.4, h: 0.3, d: 0.36, color: stone[0], offset: { y: 3.02, z: -0.03 } }),
+      box({ w: 5.1, h: 2.76, d: 0.04, color: "#241f1a", offset: { y: 1.5, z: -0.69 } }),
+      ...LIBRARY_SHELF_Y.map((y) => box({ w: 4.98, h: 0.055, d: 0.44, color: WOOD, offset: { y, z: -0.45 } }))
+    ];
+    // Uprights divide the rows into four bays, like the scroll cupboards of an old library.
+    for (const x of [-2.51, -1.28, 0, 1.28, 2.51]) parts.push(box({ w: 0.055, h: 2.68, d: 0.44,
+      color: "#6b4524", offset: { x, y: 1.55, z: -0.45 } }));
+    parts.push(box({ w: 3.55, h: 0.25, d: 0.04, color: "#6b4524", offset: { y: 3.02, z: 0.155 } }));
+    const name = "LIBRARY OF BITCOIN", cell = 0.045;
+    let cursor = -(name.length * 4 - 1) * cell / 2;
+    for (const ch of name) {
+      const glyph = SIGN_GLYPHS[ch];
+      if (glyph) for (let row = 0; row < glyph.length; row++) {
+        const line = glyph[row];
+        for (let col = 0; col < line.length; col++) {
+          if (line[col] !== "1") continue;
+          let run = 1;
+          while (line[col + run] === "1") run++;
+          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
+            offset: { x: cursor + (col + run * 0.5) * cell, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
+          col += run - 1;
+        }
+      }
+      cursor += 4 * cell;
+    }
+    for (let s = 0; s < LIBRARY_SHELF_Y.length; s++) {
+      const top = LIBRARY_SHELF_Y[s] + 0.028, inks = LIBRARY_BOOK_INKS[s];
+      for (let bay = 0; bay < 4; bay++) {
+        const center = (bay - 1.5) * 1.28;
+        if ((s + bay) % 4 === 0 || s === 3 && bay === 2) {
+          // Long, narrow parchment scrolls lie across the bay so their full length reads from the plaza.
+          // Solid paper ends and two leather ties distinguish them from hollow rolls.
+          for (let row = 0; row < 3; row++) {
+            const length = 0.8 + rand() * 0.16, half = length / 2, r = 0.045 + rand() * 0.007;
+            const paper = ["#dfcfa5", "#cdb887", "#eee0bd"][Math.floor(rand() * 3)];
+            const roll = [lathe({ profile: [[0, -half], [r * 0.88, -half], [r, -half + 0.02],
+              [r, half - 0.02], [r * 0.88, half], [0, half]], segments: 8, color: paper })];
+            for (const y of [-length * 0.24, length * 0.24]) roll.push(lathe({
+              profile: [[r + 0.003, y - 0.012], [r + 0.003, y + 0.012]], segments: 8, color: "#805634" }));
+            parts.push(moved(turnedY(turnedZ(merge(...roll), Math.PI / 2), row === 1 ? -0.12 : 0.08),
+              center + (row === 1 ? 0.04 : -0.03), top + 0.055 + row * 0.105, -0.38));
+          }
+          continue;
+        }
+        for (let x = center - 0.53, lean = false; x < center + 0.5;) {
+          const w = 0.06 + rand() * 0.05;
+          if (x + w > center + 0.53) break;
+          const h = 0.3 + rand() * 0.12, ink = inks[Math.floor(rand() * inks.length)];
+          if (!lean && x > center - 0.25 && rand() < 0.3) {
+            lean = true;
+            parts.push(moved(turnedZ(box({ w, h, d: 0.3, color: ink }), -0.15), x + w / 2, top + h / 2, -0.48));
+          } else parts.push(box({ w, h, d: 0.3, color: ink, offset: { x: x + w / 2, y: top + h / 2, z: -0.48 } }));
+          if (rand() < 0.7) parts.push(box({ w: w * 0.7, h: 0.03, d: 0.012, color: s === 4 ? "#3a2f22" : "#f1e7cf",
+            offset: { x: x + w / 2, y: top + h * 0.62, z: -0.325 } }));
+          x += w + 0.01 + (rand() < 0.14 ? 0.035 : 0);
+        }
+      }
+    }
+    return merge(...parts);
+  });
+  const libraryLamp = cached(() => merge(
+    box({ w: 0.02, h: 0.2, d: 0.02, color: "#26221f", offset: { y: -0.1 } }),
+    box({ w: 0.18, h: 0.035, d: 0.18, color: "#26221f", offset: { y: -0.21 } }),
+    box({ w: 0.14, h: 0.2, d: 0.14, color: "#ffcd6e", emissive: 1, offset: { y: -0.34 } }),
+    box({ w: 0.17, h: 0.03, d: 0.17, color: "#26221f", offset: { y: -0.46 } }),
+    box({ w: 0.012, h: 0.012, d: 0.16, color: "#26221f", offset: { y: -0.34 } })
   ));
   const labDesk = cached(() => {
     const parts = [
@@ -678,7 +766,8 @@
     };
     return { node, solids, stations, equipment, displays, updateScreens };
   };
-  // Jetpack tanks and backplate only; the flame is a separate geometry.
+  // Jetpack tanks and backplate only; the flame is a separate geometry. Both are worn, so both are marked
+  // as character parts and stay in reduced reflections.
   const JET_UNIT = 0.075;
   const JET_ORIGIN = { x: -3 * JET_UNIT, y: 0, z: -2 * JET_UNIT };
   const jetpack = cached(() => {
@@ -690,7 +779,7 @@
     }
     v.fill(2, 3, 2, 5, 1, 1, 1);
     v.fill(2, 3, 4, 4, 0, 0, 2);
-    return voxGeo(v, { unit: JET_UNIT, palette: ["#c8552f", "#9aa1a8", "#3c3f44"], origin: JET_ORIGIN });
+    return characterGeometry(voxGeo(v, { unit: JET_UNIT, palette: ["#c8552f", "#9aa1a8", "#3c3f44"], origin: JET_ORIGIN }));
   });
   const jetFlame = cached(() => {
     const v = vox();
@@ -699,7 +788,7 @@
       v.set(x + (x ? 0 : 1), -2, 1, 1);
       v.set(x + (x ? 1 : 0), -2, 0, 1);
     }
-    return voxGeo(v, { unit: JET_UNIT, palette: ["#ffb13b", "#ffe9a8"], origin: JET_ORIGIN, emissive: { 0: 1, 1: 1 } });
+    return characterGeometry(voxGeo(v, { unit: JET_UNIT, palette: ["#ffb13b", "#ffe9a8"], origin: JET_ORIGIN, emissive: { 0: 1, 1: 1 } }));
   });
   const bedroll = cached(() => merge(box({ w: 1.9, h: 0.09, d: 0.85, color: "#2e2724" }), box({ w: 0.4, h: 0.16, d: 0.6, color: "#40342c", offset: { x: 0.65, y: 0.1 } })));
   // A cartoon puff: a low-poly ellipsoid (five rings of eight) with a seeded wobble on every inner vertex, shaded
@@ -772,7 +861,9 @@
   // shingled over the clump, each rosette radiating from a point on the surface and lifted out of it. Every leaf
   // takes the normal pointing out of the clump, so the mass lights softly while its outline stays leafy; rosettes
   // high on the clump take the light greens and low ones the dark.
-  const leafy = (geo, cx, cy, cz, rx, ry, rz, tones, rand, count, size) => {
+  const leafy = (geo, cx, cy, cz, rx, ry, rz, tones, rand, count, size, lod = 0) => {
+    // Consume the same recipe samples at every level, keeping surviving rosettes and later flowers in place.
+    // Coarse crowns emit fewer complete rosettes over their unchanged closed core, never arbitrary face subsets.
     puff(geo, cx, cy, cz, rx * 0.84, ry * 0.84, rz * 0.84, [tones[0], tones[0], tones[0], tones[0]], rand, 4, 7);
     const detailStart = geo.faces.length;
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -790,6 +881,7 @@
       const bx = dy * tz - dz * ty, by = dz * tx - dx * tz, bz = dx * ty - dy * tx;
       const band = Math.min(3, Math.max(1, Math.round(1.7 + dy * 1.5 + (rand() - 0.5) * 0.8))), light = tones[band], dark = tones[band - 1];
       const leaves = 5 + (rand() < 0.4 ? 1 : 0), turn0 = rand() * Math.PI * 2, len = size * (0.85 + rand() * 0.3), rise = 0.35 + rand() * 0.2;
+      if (lod && Math.floor((k + 1) * 0.22) === Math.floor(k * 0.22)) continue;
       for (let n = 0; n < leaves; n++) {
         const t = turn0 + n / leaves * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t);
         const ux = tx * c + bx * sn, uy = ty * c + by * sn, uz = tz * c + bz * sn;
@@ -881,8 +973,8 @@
     if (geo.normals) padNormals(geo);
     return geo;
   };
-  // The drawn leaves extend beyond the old solid crown. Their upward faces
-  // catch landings, but never become walls or ceilings for walkers below.
+  // The drawn leaves' upward faces catch landings, including the lower crown
+  // which never becomes walls or ceilings for walkers below.
   // Built once with the tree and indexed by solidProps with its trunk shell.
   const canopySupport = (geo, from, to = geo.faces.length) => {
     const faces = [], v = geo.verts;
@@ -1112,17 +1204,62 @@
     }
     return merge(...parts);
   };
-  const cartoonTree = (i, rand, shell) => {
+  // A closed puff clipped above the walking-headroom plane. Its original upper
+  // faces remain exact; down-facing fans close the cut at the lobe's centre.
+  const crownSolid = (part, floor, cx, cz) => {
+    const v = part.verts, out = { verts: [cx, floor, cz], faces: [], lines: [] };
+    for (const face of part.faces) {
+      const indices = []; let enter = -1, exit = -1;
+      let a = face.i[face.i.length - 1] * 3, aboveA = v[a + 1] >= floor;
+      for (const vertex of face.i) {
+        const b = vertex * 3, aboveB = v[b + 1] >= floor;
+        if (aboveA !== aboveB) {
+          const t = (floor - v[a + 1]) / (v[b + 1] - v[a + 1]), index = out.verts.length / 3;
+          out.verts.push(v[a] + (v[b] - v[a]) * t, floor, v[a + 2] + (v[b + 2] - v[a + 2]) * t);
+          indices.push(index);
+          if (aboveB) enter = index; else exit = index;
+        }
+        if (aboveB) {
+          indices.push(out.verts.length / 3);
+          out.verts.push(v[b], v[b + 1], v[b + 2]);
+        }
+        a = b; aboveA = aboveB;
+      }
+      if (indices.length >= 3) out.faces.push({ i: indices, color: face.color, emissive: 0 });
+      if (enter >= 0 && exit >= 0) out.faces.push({ i: [0, enter, exit], color: face.color, emissive: 0 });
+    }
+    return out;
+  };
+  // Closed, faceted foliage masses. Both detail levels keep every lobe; only its tessellation changes.
+  // Mesh wobble has its own seed so reducing facets cannot move later lobes or their flowers.
+  const clumped = (geo, cx, cy, cz, rx, ry, rz, tones, rand, lod, tips = null, solid = null) => {
+    // Eight buried triangles provide conservative visibility coverage inside the central lobe on both levels.
+    // The decorative outer lobes draw and support landings, but never multiply sight-guide ray work.
+    puff(geo, cx, cy, cz, rx * 0.5, ry * 0.5, rz * 0.5, tones, () => 0.5, 2, 4);
+    const detailStart = geo.faces.length, turn = rand() * Math.PI * 2;
+    for (let n = 0; n < 5; n++) {
+      const a = turn + n * Math.PI / 2, reach = n ? 0.48 + rand() * 0.08 : 0;
+      const x = cx + Math.cos(a) * rx * reach, y = cy + (n ? 0.12 + rand() * 0.1 : 0) * ry, z = cz + Math.sin(a) * rz * reach;
+      const w = n ? 0.5 + rand() * 0.08 : 0.86, h = n ? 0.64 + rand() * 0.08 : 0.82;
+      const part = { verts: [], faces: [], lines: [] }, wobble = mulberry32(Math.floor(rand() * 4294967296));
+      puff(part, x, y, z, rx * w, ry * h, rz * w, tones, wobble, lod ? 3 : 4, lod ? 6 : 8);
+      flatInto(geo, part);
+      if (solid) solid.parts.push(crownSolid(part, solid.floor, x, z));
+      if (tips) tips.push([x, y + ry * h, z]);
+    }
+    for (let i = detailStart; i < geo.faces.length; i++) geo.faces[i].visibility = false;
+  };
+  const cartoonTree = (i, rand, shell, floor, lod = 0, collision = null) => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
     limb(geo, 0.05, 1.55, 0, 0.62, 1.95, 0.02, 0.09, 0.05, 6, BARK[1]);
     if (i % 2) limb(geo, 0, 1.5, -0.1, -0.7, 1.9, -0.3, 0.08, 0.05, 6, BARK[1]);
     // The bark keeps its smooth normals: zeros mean "not given" to the renderer.
     while (geo.normals.length < geo.verts.length) geo.normals.push(0);
-    const canopyStart = geo.faces.length;
-    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) leafy(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, Math.round(14 + rx * rz * 2.6), 0.3);
+    const canopyStart = geo.faces.length, solid = collision ? null : { floor, parts: [] };
+    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) clumped(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, lod, null, solid);
     geo.normals = Float32Array.from(geo.normals);
-    geo.collisionGeometry = merge(shell, canopySupport(geo, canopyStart));
+    geo.collisionGeometry = collision || merge(shell, ...solid.parts, canopySupport(geo, canopyStart));
     return geo;
   };
   // Tree is TREE_HEIGHT units tall.
@@ -1151,57 +1288,61 @@
       const y = voxCoords(key, CELL)[1];
       canopyFloor = Math.min(canopyFloor, y); canopyTop = Math.max(canopyTop, y + 1);
     }
-    // Keep the upper crown standable; lower leaves and branch tips let
-    // walkers through, including tall helmets on quarter-unit uphill ledges.
-    // Roots and the main trunk remain solid throughout.
+    // Preserve the original placement/headroom envelope, but only roots and
+    // the main trunk keep voxel collision. The drawn lobes supply the crown.
     const solid = vox(), middle = Math.max(11, Math.ceil((canopyFloor + canopyTop) / 2));
+    let solidRadius = 0;
     for (const [key, color] of v.map) {
       voxCoords(key, CELL);
       const x = CELL[0], y = CELL[1], z = CELL[2];
-      if (y >= middle || color < 2 && (y === 0 || x >= -1 && x <= 0 && z >= -1 && z <= 0)) solid.set(x, y, z, color);
+      const trunk = color < 2 && (y === 0 || x >= -1 && x <= 0 && z >= -1 && z <= 0);
+      if (y >= middle || trunk) solidRadius = Math.max(solidRadius, Math.hypot(Math.max(Math.abs(x), Math.abs(x + 1)), Math.max(Math.abs(z), Math.abs(z + 1))) * QUARTER);
+      if (trunk) solid.set(x, y, z, color);
     }
     const palette = ["#6b4a2b", "#4e361f", ...CANOPIES[i]];
     // Drawn as a cartoon tree: a tapered eight-sided trunk with its branch stubs under crowns of low-poly
-    // puffs on the voxel crown's own ellipsoids. Keep its solid shell and
-    // extend landing support across every visible leaf and lower crown.
+    // puffs on the voxel crown's own ellipsoids. Their clipped upper surfaces
+    // are solid; visible lower clumps catch landings without blocking walkers.
     const shell = voxGeo(solid, { unit: QUARTER, palette });
-    const geometry = cartoonTree(i, rand, shell);
+    const canopySamples = [];
+    const geometry = cartoonTree(i, () => { const value = rand(); canopySamples.push(value); return value; }, shell, middle * QUARTER);
     // Crowns stir in the wind; the collision shell stays where it stands.
     geometry.sway = 0.003;
-    let radius = 0, solidRadius = 0;
+    let radius = 0;
     for (let j = 0; j < geometry.verts.length; j += 3) radius = Math.max(radius, Math.hypot(geometry.verts[j], geometry.verts[j + 2]));
-    const solidVerts = shell.verts;
-    for (let j = 0; j < solidVerts.length; j += 3) solidRadius = Math.max(solidRadius, Math.hypot(solidVerts[j], solidVerts[j + 2]));
     geometry.treeRadius = radius;
     geometry.treeSolidRadius = solidRadius;
     geometry.treeCanopyFloor = canopyFloor * QUARTER;
     geometry.treeSolidCanopyFloor = middle * QUARTER;
-    return geometry;
+    let sample = 0;
+    const coarse = cartoonTree(i, () => canopySamples[sample++], null, middle * QUARTER, 1, geometry.collisionGeometry);
+    return BL.models.foliageLods(geometry, coarse);
   });
   const CLUMPS = [
     [[0, 1.0, 0, 1.9, 1.8, 1.7], [0.7, 1.4, -0.5, 1.3, 1.3, 1.2]],
     [[0, 1.4, 0, 2.5, 2.2, 2.3], [-1.2, 2.0, 0.8, 1.7, 1.6, 1.6], [1.3, 1.8, -0.9, 1.6, 1.5, 1.5]],
     [[0, 1.4, 0, 3.4, 2.0, 2.9], [-1.5, 2.1, 0.6, 2.0, 1.9, 1.9], [1.7, 2.3, -0.5, 2.0, 2.0, 2.0], [0.3, 2.8, 1.0, 1.6, 1.5, 1.5]]
   ];
-  // Bushes: leafy clumps on the voxel bushes' own ellipsoids. The first two flower (peach and pink, then yellow and
+  // Bushes: solid clumps with flowers perched on their upper tips. The first two flower (peach and pink, then yellow and
   // purple), the third carries round red berries.
-  const bush = variants((i) => {
+  const cartoonBush = (i, lod = 0) => {
     const rand = mulberry32(7 + i), geo = { verts: [], faces: [], lines: [], normals: [], foliageVisibility: false }, tones = ["#3a6e24", "#56902f", "#6fae3a", "#8ccb4b"].map(hexToRgb);
-    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) leafy(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, Math.round(10 + rx * rz * 3.2), 0.17);
-    const [cx, cy, cz, rx, ry, rz] = CLUMPS[i][0];
-    for (let n = 0; n < (i === 2 ? 9 : 6); n++) {
-      const a = rand() * Math.PI * 2, up = 0.25 + rand() * 0.6, side = Math.sqrt(1 - up * up);
-      const nx = Math.cos(a) * side, ny = up, nz = Math.sin(a) * side;
-      const px = (cx + nx * rx * 1.02) * QUARTER, py = (cy + ny * ry * 1.02) * QUARTER, pz = (cz + nz * rz * 1.02) * QUARTER;
+    const tips = [];
+    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) clumped(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, lod, tips);
+    const count = i === 2 ? 9 : 6;
+    for (let n = 0; n < count; n++) {
+      const [px, top, pz] = tips[Math.floor(n * tips.length / count)], py = top + (i === 2 ? 0.035 : 0.006);
       if (i === 2) puff(geo, px, py, pz, 0.05, 0.05, 0.05, [hexToRgb("#a8221f"), hexToRgb("#c8322e"), hexToRgb("#e0473c"), hexToRgb("#ff6a55")], rand, 3, 6);
       else {
         const ink = FLOWER_INKS[(i * 2 + n) % FLOWER_INKS.length];
-        flower(geo, px, py, pz, nx, ny, nz, ink[0], ink[1], 0.075, rand);
+        flower(geo, px, py, pz, 0, 1, 0, ink[0], ink[1], 0.075, rand);
       }
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
-  });
+  };
+  // Keep the closed coarse clumps at distance; crossed silhouette cards look like upright fins on low bushes.
+  const bush = variants((i) => BL.models.foliageLods(cartoonBush(i), cartoonBush(i, 1), false));
   // The voxel boulder the mine's crack rock is veined for; everywhere else takes the cartoon `rock`.
   const ROCK_SHAPES = [{ rx: 3.2, ry: 3.6, rz: 2.8 }, { rx: 5, ry: 3.8, rz: 4.2 }];
   const voxelRock = variants((i) => {
@@ -1470,13 +1611,15 @@
         geo.faces.push({ i: [rings[2][e], tip, rings[2][f]], color: GRASS_TONES[n % 2 ? 2 : 3], emissive: 0 });
       }
     }
-    return Object.assign(noShadow(geo), { sway: 0.3 });
+    Object.assign(noShadow(geo), { sway: 0.3 });
+    // This final tuft is decoration only; it has no collision shell or cutaway readers.
+    return BL.compactGeometry?.enabled ? BL.compactGeometry.pack(geo, { immutable: true, renderOnly: true }) : geo;
   });
   const grass = grassTuft;
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
-  // Firepit geometry only; the flame is fireFlame.
+  // Firepit geometry only; the fires themselves live in the blaze module.
   const firepit = cached(() => {
     const rand = mulberry32(131);
     return merge(
@@ -1487,19 +1630,6 @@
       }),
       ...Array.from({ length: 3 }, (_, n) => turn(box({ w: 0.9, h: 0.14, d: 0.14, color: WOOD_DK, offset: { y: 0.12 + n * 0.05 } }), n * Math.PI / 3, 0.18))
     );
-  });
-  const FLAME = [[0.34, 0.3, 0.22, 0, 0, "#ff9a2e"], [0.26, 0.22, 0.44, 0.02, -0.02, "#ffc148"], [0.2, 0.18, 0.6, 0.06, 0.03, "#ffc148"], [0.16, 0.14, 0.72, 0.03, 0.05, "#fff0b0"], [0.12, 0.12, 0.84, -0.01, 0.02, "#fff0b0"], [0.14, 0.16, 0.36, -0.16, 0.04, "#ffc148"], [0.12, 0.14, 0.5, 0.17, 0.1, "#ff9a2e"]];
-  const fireFlame = cached(() => {
-    const geometry = noShadow(merge(...FLAME.map(([w, h, y, x, z, color]) => box({ w, h, d: w, color, emissive: 1, offset: { x, y, z } }))));
-    // Keep ignition aligned with the rendered flames, not the firepit's wide
-    // NPC avoidance circle. Each row is a box centre and half extents.
-    geometry.fireBoxes = new Float32Array(FLAME.length * 6);
-    for (let i = 0; i < FLAME.length; i++) {
-      const [w, h, y, x, z] = FLAME[i], at = i * 6;
-      geometry.fireBoxes[at] = x; geometry.fireBoxes[at + 1] = y; geometry.fireBoxes[at + 2] = z;
-      geometry.fireBoxes[at + 3] = w * 0.5; geometry.fireBoxes[at + 4] = h * 0.5; geometry.fireBoxes[at + 5] = w * 0.5;
-    }
-    return geometry;
   });
   const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
   const butterfly = variants((i) => {
@@ -1513,7 +1643,8 @@
     ));
   });
   const firefly = cached(() => noShadow(box({ w: 0.06, h: 0.06, d: 0.06, color: "#d9ff6a", emissive: 1 })));
-  const ember = cached(() => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 })));
+  // The ember model lives in the blaze module now.
+  const ember = cached(() => BL.blaze.emberModel());
   const vine = cached(() => {
     const rand = mulberry32(53);
     const leaves = [];
@@ -1537,7 +1668,7 @@
     for (const [cx, rx, rz] of puffs) blob(v, { cx: cx - mid + 0.5, cy: 1, cz: 0.5, rx, ry: 1.6, rz, chip: 0.3, rand, color: (x, y) => y > 0 ? 0 : 1 });
     // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the
     // cells already there: every cell added sits under another, so the cloud gains body without a
-    // single new top face (the render mesh is the surface an Ooga lands on). The base rounds up toward
+    // single new top face. The base rounds up toward
     // the rim so the cloud does not end in a slab, and it is set by each puff's ellipse rather than
     // by the column heights, which the chipping makes ragged.
     const lows = new Map();
@@ -1587,5 +1718,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, CARVED_M, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, libraryNook, libraryLamp, LIBRARY_SHELF_Y, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, clumped, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

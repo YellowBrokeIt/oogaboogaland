@@ -117,6 +117,9 @@
   let home = "hub";
   let renderer, game, world, go, root, camera, hud, mhud, hooks, input, pilot, fx, audio, crew, clock;
   let sim = null, s = null, cave = null, unsubscribeFeed = null, minuteTimer = 0;
+  let unwatchScores = null;
+  // A ranked run keeps its start identity across visits, but never trusts an older localStorage save.
+  const scoreRuns = new WeakMap();
   let phase = "intro", hudTimer = 0, paletteTimer = 0, sunTimer = 0, lightTimer = 0, ripple = 0, cardTimer = 0, saveTimer = 0;
   // The overview: the camera let off the player's Ooga to look round the chamber; any step he takes
   // brings it back behind him.
@@ -127,7 +130,7 @@
   // The last hundredth of a coin the payout tick sounded for, the halving's lamp dip, and its countdown.
   let paidShown = -1, halvingDim = 0, halvingShown = -1;
   let shownLayout = -1, shownFaults = -1, shownMilestone = 0, shownLog = 0, shownEvent = -1, shownCard = "", shownArrivals = 0, shownStrikes = 0;
-  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameNodes, lampNodes, busbars;
+  let cpuNodes, gpuNodes, padNodes, holderNodes, powerNodes, trophyNodes, gearNodes, markerNodes, flameRigs, fireRigOf, lampNodes, busbars;
   // The fan spot a chamber's cooling fault is worked from: its first fan standing, else its first spot.
   const coolSpotOf = (c) => {
     for (let k = c * R.COOL_SPOTS; k < (c + 1) * R.COOL_SPOTS; k++) if (s.cooler[k]) return k;
@@ -436,18 +439,21 @@
       asicBatches[k].instanceCount = asicCount[k];
       asicBatches[k].instanceVersion++;
     }
-    // A flame over every fire.
+    // A flame over every fire. The rig each fault shows is the scene's, kept off the sim's fault so a save
+    // stays plain data.
     let f = 0;
+    fireRigOf.clear();
     for (const fault of s.faults) {
       if (!fault.active || fault.kind !== "fire" || f >= FLAMES) continue;
       unitSpot(fault.unit, SPOT);
-      const node = flameNodes[f++];
-      node.visible = true;
-      node.position.x = SPOT.x;
-      node.position.y = SPOT.y + 0.1;
-      node.position.z = SPOT.z;
+      const rig = flameRigs[f++];
+      fireRigOf.set(fault, rig);
+      rig.root.visible = true;
+      rig.root.position.x = SPOT.x;
+      rig.root.position.y = SPOT.y + 0.1;
+      rig.root.position.z = SPOT.z;
     }
-    for (; f < FLAMES; f++) flameNodes[f].visible = false;
+    for (; f < FLAMES; f++) flameRigs[f].root.visible = false;
     props.price.geometry = MM.priceBoard(s.shortage ? 1 : 0);
     props.board.glow = s.rug ? 0.1 : s.poolBonus ? 1.6 : 1;
     const dim = dark() ? 0.15 : 1;
@@ -546,18 +552,15 @@
   };
   const hashScale = { top: 1 };
 
-  // The type on both boards, set in the jumbotron's 5x7 font on one offscreen canvas for the visit and
-  // merged into quads. Each figure is compared as a rounded number first, so an unchanged board builds
-  // nothing; a rebuilt panel releases the geometry it replaces.
+  // Both boards share a small transparent painter; each stable panel snapshots it to its own canvas.
+  // Figures compare rounded values first, so unchanged boards repaint and upload nothing.
   const { drawText, measureText } = BL.jumbotron.text;
-  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5], LABEL_BG_CSS = "rgb(3,4,5)";
+  const LABEL_PX = 0.011, LABEL_BG = [3, 4, 5];
   const labelState = { price: -1, change: 0, hi: -1, lo: -1, hash: -1, top: -1, diff: -1, real: -1 };
   const drawLabels = (panelNode, w, h, draw) => {
-    labelCtx.fillStyle = LABEL_BG_CSS;
-    labelCtx.fillRect(0, 0, w, h);
+    labelCtx.clearRect(0, 0, w, h);
     draw();
-    if (panelNode.geometry) renderer.releaseGeometry(panelNode.geometry);
-    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG);
+    panelNode.geometry = BL.poolModels.panelFrom(labelCtx, w, h, LABEL_PX, LABEL_PX, LABEL_BG, panelNode.geometry);
   };
   // Where a height on a chart falls in its panel's canvas rows.
   const rowOf = (C, y) => Math.round((C.labelY + C.labelH * LABEL_PX - y) / LABEL_PX) - 3;
@@ -624,7 +627,8 @@
     for (const fault of s.faults) {
       if (!fault.active) continue;
       spotOf(fault.kind, fault.unit, SPOT);
-      n = fault.kind === "fire" ? pushLight(n, SPOT.x, SPOT.y + 0.8, SPOT.z, 7, 1, 0.42, 0.12) : fault.kind === "melt" ? pushLight(n, SPOT.x, SPOT.y + 0.6, SPOT.z, 6, 1, 0.15, 0.1) : pushLight(n, SPOT.x, 2, SPOT.z, 5, 0.9, 0.25, 0.1);
+      const rig = fireRigOf.get(fault), fk = rig ? rig.light : 1;
+      n = fault.kind === "fire" ? pushLight(n, SPOT.x, SPOT.y + 0.8, SPOT.z, 7, 1 * fk, 0.42 * fk, 0.12 * fk) : fault.kind === "melt" ? pushLight(n, SPOT.x, SPOT.y + 0.6, SPOT.z, 6, 1, 0.15, 0.1) : pushLight(n, SPOT.x, 2, SPOT.z, 5, 0.9, 0.25, 0.1);
     }
     const out = dark();
     if (s.sun > 0.05) n = pushLight(n, L.PROP_AT.shaft.x, 3.4, L.PROP_AT.shaft.z, 7, 0.55 * s.sun, 0.52 * s.sun, 0.4 * s.sun);
@@ -1186,8 +1190,6 @@
     o.dist = o.tDist = THIRD.dist;
     o.pitch = o.tPitch = THIRD.pitch;
   };
-  const controlsToast = () => hud.toast(COARSE ? `You are ${BL.characters.displayOf(crew.crew[0].name)} · the stick walks, WORK works on what is next to you, View looks round the cave`
-    : `You are ${BL.characters.displayOf(crew.crew[0].name)} · W A S D walk, mouse or Q E turn, Space works on what is next to you, C cracks a rock, V looks round`);
   // The overview lets the camera off the Ooga to a chamber's preset (`view`, else the chamber he
   // stands in); the stick or a step brings it back behind him.
   const setOverview = (on, view) => {
@@ -1542,9 +1544,13 @@
   const finish = () => {
     if (phase === "results") return;
     phase = "results";
+    hud.setPanelsHidden(false);
     smother.unit = -1;
     mhud.center("", 1);
     const improved = game.recordMine({ sats: s.minedSats, seconds: Math.max(1, Math.round(s.time)), ending: s.reason, won: s.won, score: s.score, continued: s.continued > 0 });
+    const ranked = scoreRuns.get(sim);
+    BL.highscores?.submit(ranked?.ticket, "mine-1", s.score);
+    if (ranked) ranked.ticket = null;
     audio.cue(s.won ? "win" : "lose");
     mhud.results(s, improved, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
     selection.type = "";
@@ -1575,11 +1581,15 @@
     if (!s.over && s.time > 0) mineSim.save(sim, world.mineLead);
   };
   const start = () => {
+    if (s.time === 0 && !scoreRuns.has(sim)) {
+      const ticket = BL.highscores?.begin("mine") || null;
+      scoreRuns.set(sim, { ticket, id: ticket ? BL.net.state.me.id : 0, epoch: BL.net.state.logoutEpoch });
+    }
     phase = "run";
+    hud.setPanelsHidden(true);
     mhud.setSection("run");
     audio.activate();
     showAct(true);
-    controlsToast();
   };
 
   const onAction = (action) => {
@@ -1613,7 +1623,10 @@
       go("mine");
     } else if (action === "mine-keep") {
       if (sim.carryOn()) {
+        const ranked = scoreRuns.get(sim), account = BL.net.state;
+        if (ranked && ranked.id && ranked.id === account.me?.id && ranked.epoch === account.logoutEpoch) ranked.ticket = BL.highscores?.begin("mine") || null;
         phase = "run";
+        hud.setPanelsHidden(true);
         mhud.setSection("run");
         showAct(true);
         hud.toast("Back to work. The debts are gone; the score keeps what you mined, and wears no medal.");
@@ -1675,7 +1688,7 @@
   };
 
   const onKey = (e) => {
-    if (e.key === "Escape") {
+    if (BL.controls.matches(e, "escape")) {
       if (selection.type) {
         selection.type = "";
         mhud.showCard(null);
@@ -1684,13 +1697,12 @@
       return;
     }
     if (e.repeat) return;
-    if (e.key === "0") setOverview(true, "den");
-    else if ((e.key === "v" || e.key === "V") && phase === "run") setOverview(!overview);
-    else if (e.key === "m" || e.key === "M") mhud.setMuted(audio.setMuted(!audio.muted));
+    if (BL.controls.matches(e, "resetView")) setOverview(true, "den");
+    else if (BL.controls.matches(e, "mineView") && phase === "run") setOverview(!overview);
     else if ((e.key === "s" || e.key === "S") && e.shiftKey && phase === "run") sellSats();
-    else if ((e.key === "c" || e.key === "C") && phase === "run") crackNearest();
-    else if ((e.key === "p" || e.key === "P") && phase === "run") pause(!s.paused);
-    else if (e.key === "Enter" && phase === "intro") start();
+    else if (BL.controls.matches(e, "crack") && phase === "run") crackNearest();
+    else if (BL.controls.matches(e, "pause") && phase === "run") pause(!s.paused);
+    else if (BL.controls.matches(e, "start") && phase === "intro") start();
   };
 
   // What the log says happened since the last frame, turned into sound and words. Only runs when the
@@ -1920,14 +1932,10 @@
     // A sounding smoke alarm blinks its light; a quiet one glows faintly.
     const blink = Math.floor(sceneTime * 4) % 2 ? 1.6 : 0.15;
     for (let c = 0; c <= s.dug; c++) gearNodes[2][c].glow = s.alarmOn[c] ? blink : 0.4;
-    // Flames flicker; the fire itself is the sim's.
+    // Each fire's flame flickers on its own clock; the fire itself is the sim's.
     for (let f = 0; f < FLAMES; f++) {
-      const node = flameNodes[f];
-      if (!node.visible) continue;
-      const k = 0.85 + Math.sin(performance.now() * 0.02 + f * 1.7) * 0.2;
-      node.scale.x = node.scale.z = 0.7 * k;
-      node.scale.y = k;
-      if (Math.random() < dt * 6) fx.burst(node.position.x, node.position.y + 0.4, node.position.z, 1, FIRE_BITS, 1);
+      const rig = flameRigs[f];
+      if (rig.root.visible) rig.update(dt, sceneTime);
     }
     // A block, a milestone or the halving rolls a wave of light down every rack.
     if (ripple > 0) {
@@ -2026,6 +2034,7 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("mine", home);
     camera = createCamera({ fov: 58, near: 0.2, far: 120 });
     root = createNode();
     // The run lives on `world` for the page life, so walking out to the island does not end an hour's
@@ -2046,7 +2055,7 @@
     phase = s.over ? "results" : s.time > 0 ? "run" : "intro";
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
 
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // Space and the WORK button both come through the pilot's action: whatever is beside the Ooga.
@@ -2096,7 +2105,7 @@
     labelCanvas = document.createElement("canvas");
     labelCanvas.width = 200;
     labelCanvas.height = 100;
-    labelCtx = labelCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    labelCtx = labelCanvas.getContext("2d");
     for (const key of Object.keys(labelState)) labelState[key] = -1;
     shownCandles = shownHist = -1;
     labelTimer = 0;
@@ -2150,8 +2159,14 @@
     }));
     markerNodes = [];
     for (let m = 0; m < MARKERS; m++) markerNodes.push(place(createNode({ geometry: MM.marker(), visible: false })));
-    flameNodes = [];
-    for (let f = 0; f < FLAMES; f++) flameNodes.push(place(createNode({ geometry: MM.flame(), visible: false })));
+    flameRigs = [];
+    fireRigOf = new Map();
+    for (let f = 0; f < FLAMES; f++) {
+      const rig = BL.blaze.createVoxelRig({ scale: 0.7, embers: { get fx() { return fx; }, bits: FIRE_BITS } });
+      place(rig.root);
+      rig.root.visible = false;
+      flameRigs.push(rig);
+    }
     asicBatches = [];
     for (let k = 0; k < ASIC_MODELS; k++) {
       asicBatches.push(place(createNode({ geometry: MM.asic(k), instanceData: new Float32Array(R.PADS * R.BAYS * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true })));
@@ -2161,10 +2176,12 @@
     for (let i = 0; i < MOTES; i++) moteData[i * 20] = moteData[i * 20 + 5] = moteData[i * 20 + 10] = moteData[i * 20 + 15] = 1;
     motes = place(createNode({ geometry: models.particleGeometry("#e8d9b0", 0.035, 0.8), instanceData: moteData, instanceCount: MOTES, instanceVersion: 0, fixedInstanceCapacity: true }));
     sceneTime = 0;
-    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random.
+    // The player is whoever walked in; with nobody chosen, the Ooga this run already had, or one at random. A
+    // signed-in visitor with an Ooga leads it, as they drive only it on the island.
     const names = contributors.activeRoster.length ? contributors.activeRoster : contributors.roster;
-    const known = (name) => names.some((c) => c.name === name);
-    if (known(world.pilot)) world.mineLead = world.pilot;
+    const known = (name) => names.some((c) => c.name === name), own = BL.net.ownAmong(names);
+    if (own) world.mineLead = own;
+    else if (known(world.pilot)) world.mineLead = world.pilot;
     else if (!known(world.mineLead)) world.mineLead = names[Math.floor(Math.random() * names.length)].name;
     world.pilot = null;
     crew = mineCrew.create({ root, fx, world: { inside, obstacles, station, spotOf, chamberAt, doorZ }, lead: world.mineLead });
@@ -2174,14 +2191,15 @@
     paidShown = Math.floor(s.minedSats / 1e6);
     halvingDim = 0;
     halvingShown = -1;
-    if (phase === "run") controlsToast();
     // Tapping an Ooga takes him over.
     for (const op of crew.crew) for (const key of ["torso", "head"]) target(op.cave.parts[key], { kind: "ooga", id: op.index });
 
-    mhud = mineHud.create({ best: game.state.mine.best, coarse: COARSE, geometryFor, onTile: (key) => {
+    mhud = mineHud.create({ best: game.state.mine.best, coarse: COARSE, geometryFor,
+      sharedBest: () => BL.highscores?.best("mine", "mine-1") ?? null, onTile: (key) => {
       if (key[0] === "t" && s.trophy[Number(key.slice(1))]) select("trophy", Number(key.slice(1)));
       else buy(key, -1);
     }, onDrag, onDrop, onCard, onJob });
+    unwatchScores = BL.highscores?.watch("mine", () => mhud.showBest(game.state.mine.best)) || null;
     mhud.setPlayer(BL.characters.displayOf(crew.crew[0].name));
     hud.dismissOutside(mhud.el.card, () => {
       selection.type = "";
@@ -2201,7 +2219,7 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction(onAction);
     hud.setStats(game.state);
-    hud.el.sheet.dataset.open = "false";
+    hud.setPanelsHidden(phase === "run");
 
     mhud.setSection(phase);
     if (phase === "results") mhud.results(s, false, game.state.mine.best, !s.won && s.reason !== "time" && s.reason !== "left");
@@ -2273,6 +2291,7 @@
   };
 
   const leave = () => {
+    unwatchScores?.(); unwatchScores = null;
     window.clearInterval(minuteTimer);
     minuteTimer = 0;
     if (unsubscribeFeed) unsubscribeFeed();
@@ -2312,7 +2331,7 @@
     drag.count = 0;
     selection.type = "";
     hud = mhud = hooks = input = pilot = fx = audio = crew = clock = cave = props = asicBatches = motes = candles = hashMarks = chartLabels = labelCanvas = labelCtx = null;
-    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameNodes = lampNodes = busbars = null;
+    cpuNodes = gpuNodes = padNodes = holderNodes = powerNodes = trophyNodes = gearNodes = markerNodes = flameRigs = fireRigOf = lampNodes = busbars = null;
     breakers = levers = fanNodes = bladeNodes = batteryNode = null;
     sim = s = null;
     mineScene.input = mineScene.debug = mineScene.agentControls = null;
@@ -2323,7 +2342,7 @@
   // or housekeeping frees a buffer the next purchase is about to want back.
   const liveGeometry = (set) => {
     set.add(MM.pebbleBox()).add(MM.shinyRocks()).add(MM.rackFrame()).add(MM.coldPool()).add(MM.pad())
-      .add(MM.marker()).add(MM.flame()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
+      .add(MM.marker()).add(MM.seal()).add(MM.fanBlade()).add(MM.fanBlur()).add(MM.candle(0)).add(MM.candle(1)).add(MM.candle(2)).add(MM.chartMark(0)).add(MM.chartMark(1)).add(MM.priceBoard(0)).add(MM.priceBoard(1)).add(MM.fanWall()).add(MM.boxFan());
     for (let c = 0; c < NC; c++) set.add(MM.chamberDecor(c));
     for (let k = 0; k < ASIC_MODELS; k++) set.add(MM.asic(k));
     for (const build of MM.POWER_BUILDERS) set.add(build());
@@ -2342,14 +2361,29 @@
     };
   };
 
-  const mineScene = {
+  const mineScene = BL.deferred.scene("mine", {
+    controlsHelp(touch) {
+      const H = BL.controlsHelp, rows = [];
+      if (phase === "intro") rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("start"), "Start mining", touch ? "Start button" : ""));
+      else {
+        rows.push(touch ? H.row([], "Walk", "Left stick") : H.movement("Walk"), H.row(touch ? [] : BL.controls.keysFor("yawLeft", "yawRight"), "Turn", touch ? "Drag" : "Mouse"));
+        for (const [action, text] of [["mineView", "Overview"], ["crack", "Crack nearby rock"], ["pause", "Pause / resume"]]) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys(action), text, touch ? (action === "mineView" ? "View button" : action === "crack" ? "Crack rocks button" : "Pause button") : ""));
+        rows.push(H.row(touch ? [] : [" "], "Work on the object beside you", touch ? "WORK button" : ""));
+        if (!touch) rows.push(H.row(["shift", "s"], "Sell sats"));
+      }
+      if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset to den overview"));
+      rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("escape"), touch ? "Leave Ooga Mine" : "Close selection / pause / leave", touch ? "Back button" : ""));
+      return { title: "Ooga Mine", rows };
+    },
+    controlsHelpHold() { pilot.controls.reset(); },
+    get cabinetMenu() { return phase === "intro"; },
     id: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return fx ? fx.inMotion : false;
     }
-  };
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.mine = mineScene;
 })();

@@ -39,7 +39,7 @@
   const DRAG_START = 6, LONG_PRESS = 380;
   // onInsert(id, at) / onMoveTo(from, at) take stack indices, 0 at the bottom.
   // slots() gives the rocket's part boundaries on screen, bottom up, as { x, reach, ys } or null.
-  const create = ({ best, onAdd, onMove, onRemove, onSelect, onPreset, onPilot, onInsert, onMoveTo, slots }) => {
+  const create = ({ best, onAdd, onMove, onRemove, onSelect, onPreset, onPilot, onInsert, onMoveTo, slots, sharedBest = () => null }) => {
     const el = {
       root: $("orbit"), build: $("orbit-build"), clear: $("orbit-clear"), tabs: $("orbit-tabs"), dv: $("orbit-dv"), dvFill: $("orbit-dv-fill"), twr: $("orbit-twr"), twrFill: $("orbit-twr-fill"), rocket: $("orbit-rocket"), palette: $("orbit-parts"), stack: $("orbit-stack"), presets: $("orbit-presets"),
       stats: $("orbit-stats"), problems: $("orbit-problems"), bill: $("orbit-bill"), launch: $("orbit-launch"), medal: $("orbit-medal"), help: $("orbit-help"),
@@ -49,6 +49,11 @@
       results: $("orbit-results"), score: $("orbit-score"), summary: $("orbit-summary"), final: $("orbit-final"), finalScore: $("orbit-final-score"), finalMedal: $("orbit-final-medal"), finalBest: $("orbit-final-best"), buildBtn: $("orbit-build-btn"), mute: $("orbit-mute"), pilot: $("orbit-pilot"), pilotName: $("orbit-pilot-name"), evaBtn: $("orbit-eva"), mission: $("orbit-mission")
     };
     const listeners = [];
+    const sharedBuild = document.createElement("p"), sharedResult = document.createElement("p");
+    sharedBuild.className = sharedResult.className = "help";
+    sharedBuild.hidden = sharedResult.hidden = true;
+    el.medal.closest("h2").after(sharedBuild);
+    el.summary.after(sharedResult);
     const on = (target, type, fn) => {
       target.addEventListener(type, fn);
       listeners.push(() => target.removeEventListener(type, fn));
@@ -60,6 +65,12 @@
     });
     const setPilot = (name) => {
       el.pilotName.firstChild.data = BL.characters.displayOf(name);
+    };
+    // A signed-in visitor with an Ooga flies it, as they drive only it on the island: the pilot stops cycling and
+    // says why.
+    const lockPilot = (locked) => {
+      el.pilot.disabled = locked;
+      el.pilot.title = locked ? "Signed in, you fly your own Ooga" : "";
     };
     const button = (text, className, fn) => {
       const b = document.createElement("button");
@@ -256,6 +267,9 @@
     };
     const refreshBest = () => {
       const b = best();
+      const shared = sharedBest();
+      sharedBuild.hidden = sharedResult.hidden = shared === null;
+      sharedBuild.textContent = sharedResult.textContent = shared === null ? "" : `Shared best · ${shared > 0 ? shared : "–"}`;
       const medal = b ? medalFor(b.score) : null;
       el.medal.hidden = !medal;
       if (medal) {
@@ -393,7 +407,7 @@
         el.finalMedal.textContent = medal.toUpperCase();
       }
       const b = best();
-      el.finalBest.textContent = improved ? "NEW BEST" : b ? `best ${b.score}` : "";
+      el.finalBest.textContent = improved ? "NEW LOCAL BEST" : b ? `local best ${b.score}` : "";
       el.final.classList.toggle("is-best", improved);
       el.final.classList.remove("is-shown");
       el.score.replaceChildren(...rows.map(([label, value]) => row(label, value)));
@@ -565,6 +579,7 @@
     el.root.addEventListener("click", eatClick, true);
     listeners.push(() => el.root.removeEventListener("click", eatClick, true));
     const dispose = () => {
+      sharedBuild.remove(); sharedResult.remove();
       finish(false);
       window.clearTimeout(clickTimer);
       window.clearTimeout(centerTimer);
@@ -588,7 +603,7 @@
       show(null);
       el.buildBtn.hidden = true;
     };
-    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, setEva, setMeters, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
+    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, lockPilot, setEva, setMeters, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
   };
   BL.rocketHud = { create, medalFor, MEDALS };
 })();

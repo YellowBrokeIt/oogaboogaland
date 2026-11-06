@@ -1,9 +1,10 @@
-// Fixed walking routes between the meadow and the headquarters beds.
+// Fixed walking routes between the meadow, headquarters and rainforest beds.
 //
 // A validated waypoint graph from the meadow down to the HQ and basement beds, memoised per island and
 // remapped onto each visit's beds. `create` returns `route`, `plan` (the same route a leg at a time, for a
 // caller that spreads planning over frames), `clearSegment` (continuous floor plus architectural clearance,
 // the shortcut test the crew reuses), `points`, `radius`, `height`, and the node and edge counts.
+// `outdoorNavigation` joins the existing bridge, ridge, nest and chamber corridors to outdoor anchors.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -11,32 +12,232 @@
   // The validated waypoint graph depends only on the island's architecture; later visits reuse it and map
   // fresh bed objects onto its nodes.
   const graphs = new WeakMap();
-  // Reserved sleeping rectangles on the rainforest terraces above the Mempool ramp.
-  // Sample the whole footprint, not just its centre, to reject channels, terrace
-  // edges and props. These are floor anchors, with no mattress or rendered items.
-  const outdoorBeds = (pool, clear = () => true) => {
-    const beds = [];
-    const L = pool.layout;
+  // Reserved sleeping rectangles on the rainforest terraces and dry forest floor, in one fixed order: the
+  // established ridge rows, then dry forest gaps outside the walking ring and gorilla nests, then a finer fill,
+  // then rings on the chamber floor under the lake once the forest is full.
+  // Sample the whole footprint, not just its centre, to reject channels, terrace edges and props. These are
+  // floor anchors, with no mattress or rendered items. The layout and its seeded scenery never move, so the
+  // order is the same on every visit and page: it is searched only as far as sleepers need it.
+  function* anchorSearch(layout, place, test) {
+    const L = layout, footprints = [], cos = Math.cos(place.ry), sin = Math.sin(place.ry);
+    const worldX = (lx, lz) => place.x + lx * cos + lz * sin, worldZ = (lx, lz) => place.z - lx * sin + lz * cos;
+    // `floor` lays the footprint on that level of rock instead of the ground's top: every sample on solid rock
+    // with open air over it.
+    const add = (radius, bearing, angle = bearing, extra = false, floor = null) => {
+      const sr = Math.sin(angle), cr = Math.cos(angle), lx = Math.sin(bearing) * radius, lz = Math.cos(bearing) * radius;
+      // The four rectangle axes keep supplemental sleepers clear of the original rows and each other.
+      if (extra) for (const other of footprints) {
+        if (Math.hypot(lx - other.x, lz - other.z) < 1.8) return null;
+        let separate = false;
+        for (let axis = 0; axis < 4; axis++) {
+          const ax = axis === 0 ? sr : axis === 1 ? cr : axis === 2 ? other.sr : other.cr;
+          const az = axis === 0 ? cr : axis === 1 ? -sr : axis === 2 ? other.cr : -other.sr;
+          const reach = 0.75 * (Math.abs(ax * sr + az * cr) + Math.abs(ax * other.sr + az * other.cr))
+            + 1.5 * (Math.abs(ax * cr - az * sr) + Math.abs(ax * other.cr - az * other.sr)) + 0.1;
+          if (Math.abs((lx - other.x) * ax + (lz - other.z) * az) >= reach) { separate = true; break; }
+        }
+        if (!separate) return null;
+      }
+      let low = Infinity, high = -Infinity;
+      for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
+        const px = lx + sr * a + cr * b, pz = lz + cr * a - sr * b, r = Math.hypot(px, pz);
+        if (extra) {
+          if (r < L.RING.path + 0.05) return null;
+          for (const nest of L.NESTS) if (Math.abs(r - L.NEST.r) < L.NEST.halfR + 0.05
+            && Math.abs(L.turn(Math.atan2(px, pz), nest.bearing) * r) < L.NEST.halfT + 0.05) return null;
+        }
+        const y = floor === null ? L.groundAt(px, pz)
+          : L.solidAt(px, floor - L.UNIT / 2, pz) && !L.solidAt(px, floor + L.UNIT / 2, pz) ? floor : -Infinity;
+        low = Math.min(low, y); high = Math.max(high, y);
+      }
+      if (low < (floor === null ? L.LEVEL.ground : floor) || high - low > 0.5 || !Number.isFinite(high)) return null;
+      for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
+        if (!test.clear(worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), place.y + high + 0.03,
+          worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b))) return null;
+      }
+      footprints.push({ x: lx, z: lz, sr, cr });
+      return { x: worldX(lx, lz), y: place.y + high, z: worldZ(lx, lz), ry: place.ry + angle + Math.PI / 2 };
+    };
     for (let along = 4; along <= 38; along += 3.6) {
-      const bearing = L.RAMP.start + along / L.RAMP.r, sr = Math.sin(bearing), cr = Math.cos(bearing);
-      for (const radius of [13.9, 16.2, 18.5]) {
-        const lx = sr * radius, lz = cr * radius, x = pool.worldX(lx, lz), z = pool.worldZ(lx, lz);
-        let low = Infinity, high = -Infinity;
-        for (let a = -0.75; a <= 0.75; a += 0.25) for (let b = -1.5; b <= 1.5; b += 0.25) {
-          const y = L.groundAt(lx + sr * a + cr * b, lz + cr * a - sr * b);
-          low = Math.min(low, y); high = Math.max(high, y);
-        }
-        if (low < L.LEVEL.ground || high - low > 0.5 || !Number.isFinite(high)) continue;
-        let safe = true;
-        for (let a = -0.75; safe && a <= 0.75; a += 0.25) for (let b = -1.5; safe && b <= 1.5; b += 0.25) {
-          safe = clear(pool.worldX(lx + sr * a + cr * b, lz + cr * a - sr * b), pool.place.y + high + 0.03,
-            pool.worldZ(lx + sr * a + cr * b, lz + cr * a - sr * b));
-        }
-        if (safe) beds.push({ x, y: pool.place.y + high, z, outdoor: true, sleeper: null,
-          node: { rotation: { y: pool.place.ry + bearing + Math.PI / 2 } } });
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (const radius of [13.9, 16.2, 18.5]) { const anchor = add(radius, bearing); if (anchor) yield anchor; }
+    }
+    for (let radius = 13.9; radius < L.R; radius += 0.5) for (let along = 1; along < L.RAMP.length; along += 0.8) {
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (let turn = 0; turn < 4; turn++) {
+        const anchor = add(radius, bearing, turn < 2 ? bearing + turn * Math.PI / 2 : (turn - 2) * Math.PI / 2, true);
+        if (anchor) { yield anchor; break; }
       }
     }
-    return beds;
+    // Props can consume the coarse rows: fill the remaining dry gaps with the same full-footprint checks.
+    for (let radius = 13.75; radius < L.R; radius += 0.25) for (let along = 0; along < L.RAMP.length; along += 0.4) {
+      const bearing = L.RAMP.start + along / L.RAMP.r;
+      for (let turn = 0; turn < 8; turn++) {
+        const anchor = add(radius, bearing, turn * Math.PI / 8, true);
+        if (anchor) { yield anchor; break; }
+      }
+    }
+    // A roster bigger than the forest sleeps on the chamber's level, dry floor, in rings along the wall and then
+    // round the shaft, off the rill at the wall and the shaft's edge. The arc from the first painting, where the
+    // view arrives, round to past the descent's junction stays clear for whoever walks in.
+    const from = L.wrap(L.RAMP.start + L.RAMP.sweep + L.JUNCTION.after + 0.5), to = L.STOPS[0] + Math.PI * 2 - 0.5;
+    for (const radius of [9.4, 7.2]) {
+      const step = 3.6 / radius, end = to - 1.5 / radius;
+      for (let bearing = from + 1.5 / radius; bearing <= end; bearing += step) {
+        const anchor = add(radius, bearing, bearing, false, L.FLOOR);
+        if (anchor) yield anchor;
+      }
+    }
+  }
+  // Anchors found so far, memoised per island (`key`) like the waypoint graph. Only plain numbers are kept,
+  // and the visit's clearance test is held only while the search runs, so no visit outlives its `leave`.
+  const anchorSources = new WeakMap();
+  // A visit's outdoor beds over the island's anchors: `beds` starts empty and `more()` appends the next bed in
+  // the fixed order (null once the forest has no more room), so the Nth overflow sleeper takes the Nth anchor.
+  const outdoor = (pool, clear = () => true, key = null) => {
+    let source = key && anchorSources.get(key);
+    if (!source) {
+      const test = { clear: null }, p = pool.place;
+      source = { anchors: [], done: false, test, search: anchorSearch(pool.layout, { x: p.x, y: p.y, z: p.z, ry: p.ry }, test) };
+      if (key) anchorSources.set(key, source);
+    }
+    const beds = [];
+    const more = () => {
+      if (beds.length === source.anchors.length) {
+        if (source.done) return null;
+        source.test.clear = clear;
+        const step = source.search.next();
+        source.test.clear = null;
+        if (step.done) { source.done = true; return null; }
+        source.anchors.push(step.value);
+      }
+      const a = source.anchors[beds.length];
+      const bed = { x: a.x, y: a.y, z: a.z, outdoor: true, sleeper: null, node: { rotation: { y: a.ry } } };
+      beds.push(bed);
+      return bed;
+    };
+    return { beds, more };
+  };
+  // The first `count` anchors as beds, searched afresh.
+  const outdoorBeds = (pool, clear = () => true, count = 0) => {
+    const forest = outdoor(pool, clear);
+    while (forest.beds.length < count && forest.more());
+    return forest.beds;
+  };
+  // The bridge, ring, ridge lookout and chamber descent are authored corridors,
+  // not a search over the forest. A bed joins one clear spur onto those fixed
+  // lines. The short east-shoulder bends pass between the existing thickets.
+  const outdoorNavigation = ({ pool, island, props }) => {
+    const L = pool.layout, D = BL.poolModels.DIR, ring = (L.RING.lowland + L.RING.path) / 2;
+    const treeFloor = node => !node.npcTreeSupport;
+    const floorAt = (x, z, y) => Math.max(island.supportAt(x, z, y, STEP, -120, RADIUS),
+      props.supportAt(x, z, y, STEP, RADIUS, null, null, false, treeFloor));
+    const point = (x, z, y) => ({ x, y: floorAt(x, z, y), z });
+    const local = (x, z, y) => point(pool.worldX(x, z), pool.worldZ(x, z), pool.place.y + y);
+    const polar = (r, a, y) => local(Math.sin(a) * r, Math.cos(a) * r, y);
+    const clearSegment = (a, b) => {
+      const count = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / SAMPLE));
+      let x = a.x, y = a.y, z = a.z;
+      for (let i = 0; i <= count; i++) {
+        const t = i / count, nx = a.x + (b.x - a.x) * t, nz = a.z + (b.z - a.z) * t, guide = a.y + (b.y - a.y) * t;
+        const ny = floorAt(nx, nz, guide), lift = Math.max(y, ny) + 0.3;
+        if (Math.abs(ny - y) > STEP + 1e-6 || Math.abs(ny - guide) > STEP + 1e-6
+          || !island.clearAt(nx, ny + 0.3, nz, RADIUS, HEIGHT - 0.3)
+          || !island.voxelSegmentClearAt(x, lift, z, nx, lift, nz, RADIUS, HEIGHT - 0.3)
+          || !props.segmentClear(x, lift, z, nx, lift, nz, RADIUS, HEIGHT - 0.3)) return false;
+        x = nx; y = ny; z = nz;
+      }
+      return Math.abs(y - b.y) < 0.025;
+    };
+    const arc = (radius, from, to, floor) => {
+      const result = [], count = Math.max(1, Math.ceil(Math.abs(to - from) * radius / 1.2));
+      for (let i = 0; i <= count; i++) {
+        const angle = from + (to - from) * i / count, x = Math.sin(angle) * radius, z = Math.cos(angle) * radius;
+        result.push(local(x, z, floor === null ? L.groundAt(x, z) : floor));
+      }
+      return result;
+    };
+    const start = BL.poolModels.SITE.approachFrom - 0.8, end = pool.place.radius - L.R + 1.6;
+    const entry = point(D.x * start, D.z * start, island.surfaceAt(D.x * start, D.z * start));
+    let nodes = null;
+    const corridors = () => {
+      if (nodes) return;
+      const bridge = [entry], count = Math.ceil((end - start) / 0.5);
+      for (let i = 1; i <= count; i++) {
+        const r = start + (end - start) * i / count;
+        bridge.push(point(D.x * r, D.z * r, bridge[bridge.length - 1].y));
+      }
+      const court = [...bridge, local(0, 15.4, 0), local(0, ring, L.LEVEL.ground)];
+      const chains = [-1, 1].map(sign => [...court, ...arc(ring, 0, sign * Math.PI, L.LEVEL.ground)]);
+      // Join the ridge where its low end meets the forest, not across its high inner wall.
+      const ridgeJoin = 2.7;
+      chains.push([...court, ...arc(ring, 0, ridgeJoin, L.LEVEL.ground), ...arc(L.RAMP.r, ridgeJoin, L.RAMP.start + 0.1, null)]);
+      const east = [[8.5, -9], [8.25, -9.25], [12.75, -15], [15.25, -14.25], [15.75, -13.75], [18.5, -9], [19.75, -7.75], [20, -5.5]];
+      chains.push([...court, ...arc(ring, 0, Math.atan2(east[0][0], east[0][1]), L.LEVEL.ground),
+        ...east.map(([x, z]) => local(x, z, L.groundAt(x, z)))]);
+      for (const nest of L.NESTS) {
+        const bearing = nest.bearing > Math.PI ? nest.bearing - Math.PI * 2 : nest.bearing;
+        chains.push([...court, ...arc(ring, 0, bearing, L.LEVEL.ground), polar(L.NEST.r + L.SLOT_GRID.dr, nest.bearing, L.LEVEL.nest)]);
+      }
+      const descent = [...bridge, local(0, 15.4, 0)];
+      for (let s = 0; s <= L.RAMP.length; s += 1) { const p = L.rampPoint(s); descent.push(local(p.x, p.z, p.y)); }
+      const mouth = L.RAMP.start + L.RAMP.sweep, inner = L.SHAFT_R + 1.6;
+      descent.push(polar(L.CHAMBER_R - 1, mouth, L.FLOOR), polar(inner, mouth, L.FLOOR));
+      chains.push([...descent, ...arc(inner, mouth, mouth + Math.PI * 2, L.FLOOR)]);
+      // A shared prefix needs only one attachment candidate, with the shortest
+      // authored approach retained. No world/actor state survives this visit.
+      const unique = new Map();
+      for (const chain of chains) {
+        let distance = 0;
+        for (let i = 0; i < chain.length; i++) {
+          const p = chain[i];
+          if (i) { const q = chain[i - 1]; distance += Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z); }
+          const key = `${p.x.toFixed(6)},${p.y.toFixed(6)},${p.z.toFixed(6)}`, before = unique.get(key);
+          if (!before || distance < before.distance) unique.set(key, { point: p, chain, index: i, distance });
+        }
+      }
+      nodes = [...unique.values()];
+    };
+    const attach = function* (from) {
+      const candidates = [];
+      for (const node of nodes) {
+        const p = node.point, distance = Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z);
+        let i = candidates.length;
+        while (i && distance < candidates[i - 1].distance) i--;
+        if (i < 24) { candidates.splice(i, 0, { node, distance }); if (candidates.length > 24) candidates.pop(); }
+      }
+      for (const { node } of candidates) {
+        const clear = clearSegment(from, node.point) && clearSegment(node.point, from);
+        yield;
+        if (clear) return node.chain.slice(0, node.index + 1).concat(from);
+      }
+      return null;
+    };
+    const plan = function* (from, to) {
+      corridors();
+      // A sleeping footprint uses its highest corner; walkers use the floor
+      // under their feet, which may be half a terrace below that lying plane.
+      const a = yield* attach(point(from.x, from.z, from.y)), b = yield* attach(point(to.x, to.z, to.y));
+      if (!a || !b) return null;
+      // Routes meet at their shared prefix; never walk all the way back to the
+      // bridge just to turn between two nearby beds or reverse a pending trip.
+      let shared = 0;
+      while (shared + 1 < a.length && shared + 1 < b.length) {
+        const p = a[shared + 1], q = b[shared + 1];
+        if (Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z) > 1e-6) break;
+        shared++;
+      }
+      const route = a.slice(shared).reverse().concat(b.slice(shared + 1));
+      for (let i = 1; i < route.length; i++) {
+        const clear = clearSegment(route[i - 1], route[i]) && clearSegment(route[i], route[i - 1]);
+        yield;
+        if (!clear) return null;
+      }
+      return route;
+    };
+    const contains = (x, z) => pool.overAt(x, z) || x * D.x + z * D.z >= start
+      && x * D.x + z * D.z <= pool.place.radius && Math.abs(x * D.z - z * D.x) < BL.poolModels.SITE.width / 2;
+    return { entry, plan, clearSegment, contains };
   };
   const create = ({ island, beds, walkable = null, surfaceRoute = null }) => {
     const cached = graphs.get(island), reuse = !!cached && cached.bedIds.length === beds.length;
@@ -246,5 +447,5 @@
     };
     return { route, plan, clearSegment: segment, points, radius: RADIUS, height: HEIGHT, nodeCount: size, edgeCount: edges.reduce((sum, list) => sum + list.length, 0) / 2 };
   };
-  BL.headquartersSleep = { create, outdoorBeds };
+  BL.headquartersSleep = { create, outdoor, outdoorBeds, outdoorNavigation };
 })();

@@ -3,11 +3,11 @@
   "use strict";
   const create=()=>{
     let context=null,bus=null,hum=null,buzz=null,noise=null,filter=null,humGain=null,buzzGain=null,noiseGain=null;
-    let kind="meme-factory";
+    let kind="meme-factory",duck=false;
     let active=false,muted=false,connected=false,disposed=false;
     const gate=()=>{
       if(!bus)return;
-      const on=active&&!muted&&!document.hidden;
+      const on=active&&!muted&&!window.BL.sound.muted;
       if(on&&!connected){bus.connect(context.destination);connected=true;}
       if(!on&&connected){bus.disconnect();connected=false;}
     };
@@ -27,14 +27,16 @@
       gate();
     };
     const gesture=()=>{wake();if(active&&context?.state==="suspended")context.resume().catch(()=>{});};
-    document.addEventListener("pointerdown",gesture);document.addEventListener("keydown",gesture);document.addEventListener("visibilitychange",gate);
+    document.addEventListener("pointerdown",gesture);document.addEventListener("keydown",gesture);
+    const offSound=window.BL.sound.subscribe(gate);
     return {
-      setActive:(on,room="meme-factory")=>{active=!!on;kind=room;wake();gate();},
+      setActive:(on,room="meme-factory")=>{active=!!on;kind=room;duck=false;wake();gate();},
+      setDucked:on=>{duck=!!on;},
       update:on=>{
         if(muted!==!!on){muted=!!on;gate();}
         if(!active||!context)return;
         const t=context.currentTime;
-        bus.gain.setTargetAtTime((kind==="shop"?.12:kind==="studio"?.32:.7),t,.15);
+        bus.gain.setTargetAtTime((kind==="shop"?.12:kind==="studio"?.32:.7)*(duck?.2:1),t,.15);
         hum.frequency.setTargetAtTime(44+Math.sin(t*.8)*2,t,.08);
         buzz.frequency.setTargetAtTime(90+Math.sin(t*3.2)*7,t,.08);
         buzzGain.gain.setTargetAtTime(.006+.003*(.5+.5*Math.sin(t*1.7)),t,.12);
@@ -42,8 +44,8 @@
       },
       get stats(){return {active,connected,contexts:context?1:0,sources:context?3:0,state:context?.state||"locked"};},
       dispose:()=>{
-        disposed=true;active=false;gate();
-        document.removeEventListener("pointerdown",gesture);document.removeEventListener("keydown",gesture);document.removeEventListener("visibilitychange",gate);
+        offSound();disposed=true;active=false;gate();
+        document.removeEventListener("pointerdown",gesture);document.removeEventListener("keydown",gesture);
         if(!context)return;
         for(const source of [hum,buzz,noise]){source.stop();source.disconnect();}
         for(const node of [filter,humGain,buzzGain,noiseGain,bus])node.disconnect();

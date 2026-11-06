@@ -1,25 +1,16 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-10-08",
-  "round": "54573fc9687811278e451d116f73762d8d98b838",
+  "openedOn": "2026-11-03",
+  "round": "0f3b6ca1e43d3354d8cf7fea18a72a77d4af9e2d",
   "entries": [
     {
-      "pr": 185,
-      "head": "ac29ff9bc7cb264fc98db5a6f19aaf770e02f306",
-      "author": "hotpixelgroup",
-      "path": "src/characters/hotpixelgroup.js",
-      "base": "3b50564ba59f433e7e8142dc0ac66aa87ad24a2a",
-      "hash": "d91e740f3fb27a9d5e3bff524457285326841b48dfa298cd8eb62d307fccd4fe",
-      "lane": "manual"
-    },
-    {
-      "pr": 190,
-      "head": "781cfd99d6060d7da25aa0283ab329706861f6f4",
-      "author": "l0n0",
-      "path": "src/characters/l0n0.js",
-      "base": null,
-      "hash": "33972940a39d4b97d95cf6cc596c250e81b50b7188ee65b7e43e30c9c5b7326d",
+      "pr": 439,
+      "head": "2f11bddb8c93ca8c1b62aae95368aaaafa965cfc",
+      "author": "Bitcoin-Bill",
+      "path": "src/characters/Bitcoin-Bill.js",
+      "base": "ae1893ff00fcb4d2d3a53df8ec0b5e43939150b9",
+      "hash": "fb6daa270d4fe7a1652a72166d648d3b1962c057ddfadf78803d1f1249d9fd3a",
       "lane": "manual"
     }
   ]

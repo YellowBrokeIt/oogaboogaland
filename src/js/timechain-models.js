@@ -53,6 +53,12 @@
       }
       geo.faces.push({ i: inward ? [base + 3, base + 2, base + 1, base] : [base, base + 1, base + 2, base + 3], color, emissive });
     };
+    // The free camera can enter the ball. Paint its reverse too, with the raised bands and logos nearer the eye
+    // on the inside, so the base tiles cannot hide them. Both skins share the same turning nodes and batches.
+    const paint = (geo, r, lo, hi, bottom, top, color, emissive) => {
+      quad(geo, r, lo, hi, bottom, top, false, color, emissive);
+      quad(geo, 2 * SHELL_R - SHELL_SKIN - r, lo, hi, bottom, top, true, color, emissive);
+    };
     for (let row = 0; row < levels.length - 1; row++) for (let col = 0; col < SEGMENTS; col++) {
       const lo = -Math.PI + col * STEP, hi = lo + STEP, bottom = levels[row], top = levels[row + 1];
       const latitude = (bottom + top) / 2, longitude = (lo + hi) / 2;
@@ -60,7 +66,7 @@
       if (Math.abs(longitude) < DOOR_HALF_ANGLE && y > 0 && y < DOOR_TOP) continue;
       const band = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
       const lune = Math.floor(col * LUNES / SEGMENTS), plain = band ? ribbon : tones[(row + col % 3) % tones.length];
-      if (y <= 0 || y >= DOOR_TOP) quad(caps[lune], SHELL_R + 0.02, lo, hi, bottom, top, false, plain, band ? 0.8 : 0.5);
+      if (y <= 0 || y >= DOOR_TOP) paint(caps[lune], SHELL_R + 0.02, lo, hi, bottom, top, plain, band ? 0.8 : 0.5);
       quad(solid, SHELL_R, lo, hi, bottom, top, false, INSIDE, 0);
       quad(solid, SHELL_R - SHELL_SKIN, lo, hi, bottom, top, true, INSIDE, 0);
     }
@@ -107,8 +113,8 @@
         let group = bandGroups.get(key);
         if (!group) {
           const geometry = layer();
-          for (let i = 0; i < doorRows.length; i++) quad(geometry, SHELL_R + 0.02, -sliceWidth / 2, sliceWidth / 2,
-            doorRows[i].bottom, doorRows[i].top, false, paints[i] === 4 ? ribbon : tones[paints[i]], paints[i] === 4 ? 0.8 : 0.5);
+          for (let i = 0; i < doorRows.length; i++) paint(geometry, SHELL_R + 0.02, -sliceWidth / 2, sliceWidth / 2,
+            doorRows[i].bottom, doorRows[i].top, paints[i] === 4 ? ribbon : tones[paints[i]], paints[i] === 4 ? 0.8 : 0.5);
           group = { geometry, angles: [], lune, halfWidth: sliceWidth / 2 };
           bandGroups.set(key, group); bandRows.push(group);
         }
@@ -123,7 +129,7 @@
       cuts.push(top);
       for (let part = 0; part < cuts.length - 1; part++) {
         const low = cuts[part], high = cuts[part + 1], geometry = layer(), half = SYMBOL_CELL / (SYMBOL_SLICES * 2);
-        quad(geometry, SYMBOL_RADIUS, -half, half, low, high, false, logo, 0.85);
+        paint(geometry, SYMBOL_RADIUS, -half, half, low, high, logo, 0.85);
         symbolRows.push({ row, geometry, mask: low >= DOOR_BOTTOM_LAT && high <= DOOR_TOP_LAT, halfWidth: half });
       }
     }
@@ -186,13 +192,13 @@
       const x = side * (SITE.width / 2 + 0.1);
       geos.push(box({ w: 0.12, h: 0.12, d: GATE - POSTS[0], color: WOOD, offset: { x, y: 0.95, z: (POSTS[0] + GATE) / 2 } }));
       for (const z of POSTS) geos.push(box({ w: 0.26, h: 1.3, d: 0.26, color: WOOD, offset: { x, y: 0.5, z } }));
-      geos.push(box({ w: 0.36, h: 2.7, d: 0.36, color: WOOD, offset: { x: side * (SITE.width / 2 + 0.18), y: 1.2, z: GATE } }));
+      geos.push(box({ w: 0.36, h: 3.95, d: 0.36, color: WOOD, offset: { x: side * (SITE.width / 2 + 0.18), y: 1.7, z: GATE } }));
     }
-    geos.push(box({ w: SITE.width + 0.9, h: 0.3, d: 0.3, color: WOOD, offset: { y: 2.55, z: GATE } }));
+    geos.push(box({ w: SITE.width + 0.9, h: 0.3, d: 0.3, color: WOOD, offset: { y: 3.8, z: GATE } }));
     return merge(...geos);
   });
   // Drawn as the island's cartoon crossings are: bevelled planks on two stringers, chunky posts with Bitcoin-orange
-  // caps, thick sagging rope rails and a lantern gateway on the shore.
+  // caps, thick sagging rope rails and a lantern gateway on the shore, as tall as the Mempool bridge's gateway.
   const bridge = cached(() => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, w = SITE.width, length = DECK_END - DECK;
     const count = Math.round(length / 0.46), pitch = length / count, rope = BL.math.hexToRgb("#d2ab62");
@@ -213,14 +219,14 @@
       }
       padNormals(geo);
       flatInto(geo,
-        bevelBox({ w: 0.36, h: 2.7, d: 0.36, color: POST, offset: { x: side * (w / 2 + 0.18), y: 1.2, z: GATE } }),
-        bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: ORANGE, offset: { x: side * (w / 2 + 0.18), y: 2.62, z: GATE } }));
+        bevelBox({ w: 0.36, h: 3.95, d: 0.36, color: POST, offset: { x: side * (w / 2 + 0.18), y: 1.7, z: GATE } }),
+        bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: ORANGE, offset: { x: side * (w / 2 + 0.18), y: 3.68, z: GATE } }));
     }
     flatInto(geo,
-      bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: PLANK, offset: { y: 2.55, z: GATE } }),
-      bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#3b2a1c", offset: { y: 2.36, z: GATE } }),
-      bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb347", emissive: 1, bevel: 0.05, offset: { y: 2.16, z: GATE } }),
-      bevelBox({ w: 0.3, h: 0.06, d: 0.3, color: "#3b2a1c", offset: { y: 1.99, z: GATE } }));
+      bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: PLANK, offset: { y: 3.8, z: GATE } }),
+      bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#3b2a1c", offset: { y: 3.61, z: GATE } }),
+      bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb347", emissive: 1, bevel: 0.05, offset: { y: 3.41, z: GATE } }),
+      bevelBox({ w: 0.3, h: 0.06, d: 0.3, color: "#3b2a1c", offset: { y: 3.24, z: GATE } }));
     geo.normals = Float32Array.from(geo.normals);
     geo.collisionGeometry = bridgeShell();
     return geo;
@@ -390,7 +396,21 @@
     addChild(pad, readout, ...keys.map(key => key.node), back.node, enter.node);
     // The traveler's look into their room hangs here, just in front of the curtain, on their page alone.
     const picture = createNode({ position: { x: 0, y: PASSAGE.floor, z: PASSAGE.curtain + 0.03 }, sightHidden: true });
-    addChild(node, shellNode, createNode({ geometry: passageGlow(), sightHidden: true }), outer, entrance, bridgeNode, ...doors, plugNode, pad, picture);
+    const glow = createNode({ geometry: passageGlow(), sightHidden: true });
+    addChild(node, shellNode, glow, outer, entrance, bridgeNode, ...doors, plugNode, pad, picture);
+    // From the hollow, show just the reverse of the painted ball. The entrance belongs to a view outside or in
+    // its passage. Camera-only hiding leaves the closed collision shell and the crossing's floor in place.
+    const entryNodes = [shellNode, glow, entrance, bridgeNode, ...doors, plugNode, pad, picture];
+    const cos = Math.cos(place.ry), sin = Math.sin(place.ry);
+    const view = (eye) => {
+      const dx = eye.x - place.x, y = eye.y - place.y, dz = eye.z - place.z;
+      const x = dx * cos - dz * sin, z = dx * sin + dz * cos;
+      const inside = dx * dx + (y - SHELL_CY) ** 2 + dz * dz < SHELL_R * SHELL_R;
+      const passage = Math.abs(x) <= PASSAGE.halfW && y >= PASSAGE.floor && y <= PASSAGE.top && z >= PASSAGE.back;
+      for (const part of entryNodes) part.cameraHidden = inside && !passage;
+      // Canvas 2D sorts whole faces: pull the inner marks ahead of the larger tiles beneath them.
+      for (const batch of logoBatches) batch.node.depthBias = inside ? -1.2 : 0;
+    };
     // A key lit (1–9), or none (0); the selected number and ready Enter label turn black against amber.
     let selected = 0;
     const choose = (digit) => {
@@ -402,7 +422,7 @@
       readout.geometry = selected ? ROOM_LABELS[selected - 1] : null;
       readout.visible = !!selected;
     };
-    return { node, shell: shellNode, outer, turn, setDoors, screen, logoBatches, entrance, bridge: bridgeNode, doors, plug: plugNode, keypad: pad, keys: [...keys, back, enter], readout, choose, picture, place };
+    return { node, shell: shellNode, outer, turn, setDoors, view, screen, logoBatches, entrance, bridge: bridgeNode, doors, plug: plugNode, keypad: pad, keys: [...keys, back, enter], readout, choose, picture, place };
   };
   // Most of the time the screen holds its picture; every minute or so it runs a seven-second show on the lunes'
   // `glow` and `highlight`, never the same one twice running, then settles back exactly. Some shows take the logos

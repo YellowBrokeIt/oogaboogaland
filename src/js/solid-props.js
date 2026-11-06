@@ -108,7 +108,7 @@
       // scenery instead tags only the decorative faces in its geometry.
       const visit = (node, inheritedRagePass) => {
         const ragePass = inheritedRagePass || !!node.ragePass;
-        if (node.geometry && node.geometry.faces.length && !node.instanceData && !registered.has(node)) {
+        if (node.geometry && (node.geometry.collisionGeometry || node.geometry).faces.length && !node.instanceData && !registered.has(node)) {
           const geometry = geometryOf(node.geometry);
           if (geometry.nodes.length) {
             const count = geometry.triangles.length / 3;
@@ -621,5 +621,8 @@
       dispose() { entries.length = 0; registered.clear(); gridDirty = true; stats.nodes = stats.active = stats.transforms = stats.triangles = 0; }
     };
   };
-  BL.solidProps = { create };
+  // A mesh's shared collision tree, built ahead of its first `add` (a released hub's return builds its large ones behind
+  // the fade, a mesh a task).
+  const prepare = (geometry) => { geometryOf(geometry); };
+  BL.solidProps = { create, prepare };
 })();

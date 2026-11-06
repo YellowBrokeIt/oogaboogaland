@@ -4,7 +4,7 @@
   const BL = window.BL = window.BL || {};
   const { createNode, addChild } = BL.scene;
   const { box, lathe, merge } = BL.models;
-  const geometries = new Map(), scoped = BL.models.track(() => geometries.clear());
+  const geometries = BL.models.scopedMap(), scoped = BL.models.track(() => geometries.clear());
   const cached = (key, build) => { scoped.use(); if (!geometries.has(key)) geometries.set(key, build()); return geometries.get(key); };
   const C = { ground: "#403054", stone: "#251c39", yellow: "#ffdf38", purple: "#a453ee", cyan: "#49ddd9", water: "#414dad", green: "#55b78d" };
   const cube = (color, emissive = 0) => cached(`dsb-cube-${color}-${emissive}`, () => box({ color, emissive }));
@@ -13,13 +13,15 @@
     addChild(parent, node);
     return node;
   };
+  // Shop signs' punctuation the island's carved alphabet lacks, cut on the same 3x5 grid.
+  const PUNCTUATION = { "%": ["101", "001", "010", "100", "101"], "'": ["010", "010", "000", "000", "000"], ",": ["000", "000", "000", "010", "100"] };
   const text = (value, color = C.yellow) => cached(`dsb-text-${value}-${color}`, () => {
     const bits = [], cell = 0.16, width = (value.length * 4 - 1) * cell;
     for (let i = 0; i < value.length; i++) {
       if (value[i] === " ") continue;
-      const glyph = BL.hubModels.SIGN_GLYPHS[value[i]] || BL.hubModels.SIGN_GLYPHS[value[i].toLowerCase()];
+      const glyph = BL.hubModels.SIGN_GLYPHS[value[i]] || BL.hubModels.SIGN_GLYPHS[value[i].toLowerCase()] || PUNCTUATION[value[i]];
       if (!glyph) throw new Error(`Missing DSB glyph ${value[i]}`);
-      for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") bits.push(box({ w: 0.135, h: 0.135, d: 0.12, color, emissive: 0.6, offset: { x: i * 4 * cell + c * cell - width / 2, y: (4 - r) * cell } }));
+      for (let r = 0; r < glyph.length; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") bits.push(box({ w: 0.135, h: 0.135, d: 0.12, color, emissive: 0.6, offset: { x: i * 4 * cell + c * cell - width / 2, y: (4 - r) * cell } }));
     }
     return merge(...bits);
   });

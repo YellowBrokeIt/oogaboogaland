@@ -4,16 +4,19 @@ import { fileURLToPath } from "node:url";
 import { createGitHub } from "./character-github.mjs";
 import { BOT, OPERATORS, isOperator } from "./character-operators.mjs";
 import { CharacterRejection, touchesCharacters } from "./character-safety.mjs";
-import { LANES, manifestPath, branchPrefix, dayOf, due, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision } from "./character-submissions.mjs";
+import { inspectAccountRename } from "./character-account-rename.mjs";
+import { LANES, manifestPath, branchPrefix, dayOf, due, digest, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision, queuedCharacters } from "./character-submissions.mjs";
 
 const serializable = (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "source"));
 const manifestText = (state) => JSON.stringify(state, null, 2) + "\n";
 const STATUS = "Character intake";
 const BUNDLE_STATUS = "Character bundle safety";
 const IDENTITY_STATUS = "Character identity ownership";
-const title = (lane) => lane === "daily" ? "Daily character updates · automatic at midnight UTC" : "Character updates · maintainer review required";
+const title = (lane) => lane === "daily" ? "Daily character updates · automatic at midnight UTC"
+  : lane === "rename" ? "Character display names · maintainer review required" : "Character updates · maintainer review required";
 const body = (lane, state) => [
-  lane === "daily" ? "Validated data-only character changes. Eligible nonempty bundles merge at the first successful run after midnight UTC." : "Custom character code. A maintainer must review the exact diff and merge this PR manually. The automation never merges this lane.",
+  lane === "daily" ? "Validated data-only character changes. Eligible nonempty bundles merge at the first successful run after midnight UTC."
+    : `${lane === "rename" ? "Display names matching existing GitHub owners; all other character bytes are unchanged." : "Custom character code."} A maintainer must review the exact diff and merge this PR manually. The automation never merges this lane.`,
   "An empty bundle stays open for the next submission. The manifest is bookkeeping, not a character contribution.",
   ...state.entries.map((entry) => `- ${entry.path} — ${entry.pr ? `#${entry.pr}` : "standalone commit"} at ${entry.head}`)
 ].join("\n\n");
@@ -34,7 +37,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     const key = `build-${pr.merge_commit_sha}`, marker = `<!-- obl-character-bundle:${key} -->`;
     if ((await gh.list(`issues/${pr.number}/comments`)).some((row) => row.user.login === bot && row.body.includes(marker))) return;
     await gh.api("actions/workflows/pages.yml/dispatches", "POST", { ref: "rock", inputs: { merge_sha: pr.merge_commit_sha } });
-    await comment(pr.number, key, "Post-merge Pages build and contributor reconciliation dispatched.");
+    await comment(pr.number, key, "Post-merge page build and contributor reconciliation dispatched.");
   };
   const openBundles = async () => (await gh.list("pulls?state=open&base=rock")).filter((pr) => isBundle(pr, bot));
   const rejectSubmission = async (pr, submission, error) => {
@@ -118,6 +121,42 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       await gh.api(`pulls/${bundle.number}`, "PATCH", { body: body(lane, next) });
     }
   };
+  const checkAccountRename = async (pr, rock) => {
+    let identified = false;
+    try {
+      const rename = await inspectAccountRename(gh, pr, rock, () => { identified = true; });
+      if (!rename) return false;
+      await status(pr.head.sha, BUNDLE_STATUS, "pending", "Verifying account rename queue and registry");
+      const queued = await queuedCharacters(gh, bot);
+      if (queued.some((entry) => entry.path === rename.path
+        || [entry.character.handle, entry.character.github].some((login) => login?.toLowerCase() === rename.newLogin.toLowerCase()))) {
+        throw new CharacterRejection("Resolve the competing queued character change before migrating this account.");
+      }
+      await checkRegistry(gh, rock, [rename]);
+      const latest = await gh.api(`pulls/${pr.number}`);
+      if (latest.head.sha !== pr.head.sha || latest.state !== "open" || latest.draft) throw new Error("Account rename changed during verification");
+      await status(pr.head.sha, STATUS, "success", "Pinned numeric account and github-only signed history verified; separate PR retained");
+      await status(pr.head.sha, BUNDLE_STATUS, "success", "Verified account rename for this exact head; merge manually");
+      return true;
+    } catch (error) {
+      if (!identified) throw error;
+      await status(pr.head.sha, STATUS, "failure", "Account rename not verified; inspect the trusted workflow log");
+      await status(pr.head.sha, BUNDLE_STATUS, "failure", "Account rename verification failed");
+      throw error;
+    }
+  };
+  const accountRename = async (number) => {
+    const pr = await gh.api(`pulls/${number}`);
+    return checkAccountRename(pr, await ref("rock"));
+  };
+  const refreshAccountRenames = async () => {
+    const failures = [];
+    for (const pr of await gh.list("pulls?state=open&base=rock")) {
+      try { await accountRename(pr.number); }
+      catch (error) { failures.push(`#${pr.number}: ${error.message}`); }
+    }
+    if (failures.length) throw new Error(failures.join("\n"));
+  };
   const intake = async (submission) => {
     const rock = await ref("rock");
     const pr = submission.pr ? await gh.api(`pulls/${submission.pr}`) : null;
@@ -139,6 +178,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       return;
     }
     if (pr?.draft) { await status(pr.head.sha, STATUS, "pending", "Draft character submissions wait until ready for review"); return; }
+    if (pr && await checkAccountRename(pr, rock)) return;
     if (pr) submission = { pr: pr.number, head: pr.head.sha };
     await status(submission.head, BUNDLE_STATUS, "success", "Source PR; character extraction is gated by Character intake");
     await status(submission.head, STATUS, "pending", "Scanning character revisions and GitHub ownership");
@@ -169,12 +209,23 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     const bundles = [];
     for (const lane of LANES) bundles.push(await load(lane));
     const incomingPaths = new Set(inspected.entries.map((entry) => entry.path));
-    for (const { state } of bundles) for (const entry of state.entries) {
+    const migrations = new Set();
+    for (const { pr: bundle, state } of bundles) for (const entry of state.entries) {
+      const incoming = inspected.entries.find((next) => next.path === entry.path);
+      // Reclassify an identical operator rename queued before this lane existed.
+      // Do not take over another author's revision or release any other entry.
+      if (incoming?.lane === "rename" && entry.lane === "manual" && entry.author === incoming.author
+        && entry.hash === incoming.hash && entry.base === incoming.base) {
+        const file = await gh.file(bundle.head.sha, entry.path);
+        if (!file || digest(file.source) !== incoming.hash) throw new Error("Queued rename differs from its verified source");
+        migrations.add(entry.path); continue;
+      }
       if (incomingPaths.has(entry.path) && (entry.pr !== submission.pr || !entry.pr) && entry.head !== submission.head) throw new Error("A different submission already updates this character; resolve it before queueing another");
     }
-    // Prevent one file being represented in both the automatic and manual lane.
+    // Prevent one file being represented in multiple lanes, except the
+    // byte-identical rename migration validated above.
     for (const { state } of bundles) for (const entry of state.entries) {
-      if (incomingPaths.has(entry.path) && inspected.entries.find((next) => next.path === entry.path).lane !== state.lane) throw new Error("Character moved between review lanes; a maintainer must remove the previous queued version first");
+      if (incomingPaths.has(entry.path) && !migrations.has(entry.path) && inspected.entries.find((next) => next.path === entry.path).lane !== state.lane) throw new Error("Character moved between review lanes; a maintainer must remove the previous queued version first");
     }
     const existing = [];
     for (const { pr: bundle, state } of bundles) for (const entry of state.entries) if (!incomingPaths.has(entry.path)) {
@@ -188,22 +239,30 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     const destinations = [];
     for (const { pr: bundle, state } of bundles) {
       const additions = inspected.entries.filter((entry) => entry.lane === state.lane);
-      if (!additions.length) continue;
-      const unchanged = additions.every((entry) => state.entries.some((old) => old.path === entry.path && old.head === entry.head && old.hash === entry.hash));
+      const removed = state.entries.filter((entry) => state.lane === "manual" && migrations.has(entry.path));
+      if (!additions.length && !removed.length) continue;
+      const unchanged = !removed.length && additions.every((entry) => state.entries.some((old) => old.path === entry.path && old.head === entry.head && old.hash === entry.hash));
       if (!unchanged) {
         const next = { ...state, entries: [...state.entries.filter((old) => !incomingPaths.has(old.path)), ...additions.map(serializable)] };
         // An empty placeholder reused tomorrow starts its day on the first entry.
         if (!state.entries.length) next.openedOn = dayOf(now());
+        const restored = [];
+        for (const entry of removed) {
+          const original = await gh.file(rock, entry.path);
+          if (!original || original.sha !== entry.base) throw new Error("Queued rename base changed before migration");
+          restored.push({ path: entry.path, source: original.source });
+        }
         await gh.commit(bundle.head.ref, bundle.head.sha, [
           ...additions.map((entry) => ({ path: entry.path, source: entry.source })),
+          ...restored,
           { path: manifestPath(state.lane), source: manifestText(next) }
         ], [], `Bundle character changes from ${pr ? `PR #${pr.number}` : submission.head}`);
         await gh.api(`pulls/${bundle.number}`, "PATCH", { body: body(state.lane, next) });
       }
-      destinations.push(`#${bundle.number} (${state.lane === "daily" ? "daily automatic" : "manual review"})`);
+      if (additions.length) destinations.push(`#${bundle.number} (${state.lane === "daily" ? "daily automatic" : "manual review"})`);
       // Bot-authored commits do not start pull_request workflows. Publish the
       // required checks in this run after validating the freshly saved head.
-      await intake({ pr: bundle.number });
+      if (additions.length) await intake({ pr: bundle.number });
     }
     if (pr) {
       await comment(pr.number, `moved-${submission.head}`, `Your character changes from ${submission.head} have been copied to ${destinations.join(" and ")}.\n\n${inspected.mixed
@@ -239,8 +298,19 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     await deployMerged(await gh.api(`pulls/${bundle.number}`));
     await ensure("daily");
   };
+  const refreshReviews = async () => {
+    const failures = [];
+    for (const lane of LANES) {
+      try { await intake({ pr: (await ensure(lane)).number }); }
+      catch (error) { failures.push(`${lane}: ${error.message}`); }
+    }
+    // A stale custom submission must not prevent refreshing an independent
+    // rename's review gate. Keep reporting every lane that failed validation.
+    try { await refreshAccountRenames(); } catch (error) { failures.push(error.message); }
+    if (failures.length) throw new Error(failures.join("\n"));
+  };
   const sweep = async () => {
-    await ensure("daily"); await ensure("manual");
+    for (const lane of LANES) await ensure(lane);
     const failures = [];
     for (const pr of await gh.api("pulls?state=closed&base=rock&sort=updated&direction=desc&per_page=100")) {
       if (isBundle(pr, bot) && pr.merged_at) await deployMerged(await gh.api(`pulls/${pr.number}`));
@@ -274,7 +344,12 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw new Error("Direct rock character changes cannot be quarantined after a push. Require PRs and the character checks in branch rules.");
     }
   };
-  return { ensure, intake, mergeDaily, sweep, auditRock, deployMerged };
+  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames };
+};
+
+export const runAccountRenameChecks = async (coordinator, event) => {
+  if (event.pull_request && event.action !== "closed") return coordinator.accountRename(event.pull_request.number);
+  return coordinator.refreshAccountRenames();
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -285,15 +360,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" && (!isOperator(event.sender)
     || !OPERATORS.some((operator) => operator.login === process.env.GITHUB_TRIGGERING_ACTOR))) throw new Error("Only w-s-bitcoin and 2140data may operate manual automation runs");
-  if (event.pull_request) {
-    if (event.action === "closed") { await coordinator.ensure("daily"); await coordinator.ensure("manual"); }
+  if (process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true") {
+    // Maintenance mode has no bundle creation, intake, merge, close, sweep or
+    // page dispatch. Reviews still arrive through the unprivileged signal job.
+    await runAccountRenameChecks(coordinator, event);
+  } else if (event.pull_request) {
+    if (event.action === "closed") { for (const lane of LANES) await coordinator.ensure(lane); }
     else await coordinator.intake({ pr: event.pull_request.number, head: event.pull_request.head.sha });
   } else if (event.workflow_run) {
     const run = event.workflow_run;
     if (run.event === "pull_request_review") {
       // workflow_run can omit pull_requests for fork/review events. Only the
-      // two trusted bundle PRs need their operator review gate refreshed.
-      for (const lane of LANES) await coordinator.intake({ pr: (await coordinator.ensure(lane)).number });
+      // trusted bundle PRs need their operator review gate refreshed.
+      await coordinator.refreshReviews();
     }
     if (run.event === "push" && run.head_branch === "rock") await coordinator.auditRock(run.head_sha);
     // Ignore PR runs and automation branches. Never read its artifacts or code.

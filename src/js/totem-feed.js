@@ -2,7 +2,10 @@
 // page life. The four are asked one after another on start, then one every STEP_MS in turn while the tab is visible,
 // so each repository is asked every six minutes. Closed pull requests are read newest-updated first until their
 // updates predate the last day; only a PR merged into main or master in that day can light a totem. A refused poll
-// (403 or 429 with the limit spent) waits for GitHub's reset.
+// (403 or 429 with the limit spent) waits for GitHub's reset. Served by the site's Worker, each poll asks its
+// `/api/totems/<i>` for that scan's result instead (revalidated by ETag), and a refusal there is waited out as its
+// `retry-after` asks, reading GitHub meanwhile only for a repository the page has no reading of yet; a page that gets a
+// 404, a 405 or a reply that is not JSON there (a static host, a file page) reads GitHub itself for the rest of its life.
 //
 // Each repository's `word` is what its totem carries, in runes down its back and sides and on its name board, and its
 // `importance` to Bitcoin sizes it: its totem stands that share of Bitcoin Core's height (`totem-models.js`).
@@ -26,15 +29,54 @@
   const subscribers = new Set();
   const state = { enabled: false, polls: 0, failures: 0, lastError: "", limitedUntil: 0, repos: REPOS.map(() => ({ number: 0, url: "", changedAt: 0, seen: false })) };
   let timer = 0, turn = 0, inFlight = false, dueAt = 0;
+  let compactSupported = /^https?:$/.test(location.protocol);
+  const summaries = new Array(REPOS.length), retryAt = REPOS.map(() => 0);
 
   const emit = (event) => {
     for (const fn of subscribers) fn(event);
   };
 
+  // Hosted Workers answer a bounded summary. Source/file and static hosting retain the public GitHub feed.
+  const compact = async (index, cutoff, now) => {
+    if (!compactSupported) return null;
+    const previous = summaries[index], headers = {};
+    if (previous?.etag) headers["if-none-match"] = previous.etag;
+    const res = await fetch(`/api/totems/${index}`, { headers });
+    if (res.status === 404 || res.status === 405 || res.status !== 304 && !res.headers.get("content-type")?.includes("application/json")) {
+      compactSupported = false;
+      return null;
+    }
+    // The Worker's limit is GitHub's budget for Cloudflare's shared addresses, not this visitor's, and the Worker
+    // answers from its last good scan of the day while it has one. Its refusal is waited out; only a repository with
+    // no reading yet is read from GitHub directly meanwhile, as a page without the Worker would, unless this
+    // visitor's own GitHub limit is spent too.
+    if (res.status === 403 || res.status === 429 || res.status === 503) {
+      retryAt[index] = now + (Number(res.headers.get("retry-after")) || 60) * 1000;
+      if (state.repos[index].seen || now < state.limitedUntil) throw new Error(`HTTP ${res.status}`);
+      return null;
+    }
+    let summary;
+    if (res.status === 304 && previous) summary = previous.value;
+    else {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      summary = await res.json();
+      if (summary?.repo !== REPOS[index].repo || !Number.isSafeInteger(summary.number) || summary.number < 0
+        || !Number.isSafeInteger(summary.mergedAt) || summary.mergedAt < 0
+        || !!summary.number !== !!summary.mergedAt) throw new Error("unexpected merge summary");
+      summaries[index] = { value: summary, etag: res.headers.get("etag") || "" };
+    }
+    return summary.mergedAt > cutoff && summary.mergedAt <= now ? summary : { number: 0, mergedAt: 0 };
+  };
+
   const poll = async (index) => {
     const now = Date.now(), cutoff = now - RECENT;
     let latest = null, mergedAt = 0;
-    for (let page = 1; ; page++) {
+    const summary = await compact(index, cutoff, now);
+    if (summary) {
+      mergedAt = summary.mergedAt;
+      latest = summary.number ? { number: summary.number, html_url: `https://github.com/${REPOS[index].repo}/pull/${summary.number}` } : null;
+    }
+    for (let page = 1; !summary; page++) {
       const res = await fetch(`${API}${REPOS[index].repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`);
       if (res.status === 403 || res.status === 429) {
         const reset = Number(res.headers.get("x-ratelimit-reset"));
@@ -72,21 +114,23 @@
     emit({ type: "change", index, changedAt: mergedAt, fresh: seen && !!latest && Date.now() - mergedAt < RECENT });
   };
 
-  // One repository a call, or every one in turn when `all`; at most one call runs at a time.
+  // One repository a call, or every one in turn when `all`; at most one call runs at a time. A spent GitHub limit
+  // stops a page without the Worker; behind it the Worker is still asked.
   const run = async (all) => {
-    if (inFlight || Date.now() < state.limitedUntil) return;
+    if (inFlight || !compactSupported && Date.now() < state.limitedUntil) return;
     inFlight = true;
     dueAt = Date.now() + STEP_MS;
     try {
       for (let n = all ? REPOS.length : 1; n > 0; n--) {
         const index = turn;
         turn = (turn + 1) % REPOS.length;
+        if (compactSupported && Date.now() < retryAt[index]) continue;
         try {
           await poll(index);
         } catch (e) {
           state.failures++;
           state.lastError = e && e.message || String(e);
-          if (Date.now() < state.limitedUntil) break;
+          if (!compactSupported && Date.now() < state.limitedUntil) break;
         }
       }
     } finally {
