@@ -16,7 +16,7 @@ The 34 segments of `dsb-geography.js`'s existing coastline polygon determine
 the eligibility mask. The harbor is segments 22–28; the rear Olympus edge is
 segments 31–33 plus 0–5 (the polygon wraps between its final and first point).
 All other 18 segments receive the original underwater shelf profile, with
-tapering at the segment boundaries adjacent to exclusions. The existing Chora
+a two-metre taper at the segment boundaries adjacent to exclusions. The existing Chora
 beach remains in those eligible sectors.
 
 ## Implementation
