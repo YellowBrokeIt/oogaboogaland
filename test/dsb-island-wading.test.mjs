@@ -65,16 +65,24 @@ test('eligible coasts have a gradual real seabed and allow real body-wide walkin
     assert.ok(land.heightAt(...at3) > C.LEVEL, `dry approach missing at sector ${i}`);
     assert.ok(land.heightAt(...at7) < C.LEVEL, `underwater shelf missing at sector ${i}`);
     assert.ok(land.heightAt(...at9) < land.heightAt(...at7), `shelf not deepening at sector ${i}`);
-    let a = s.point(6), y = land.groundAt(...a);
-    for (let d = 6.2; d <= 8.01; d += .2) {
-      const b = s.point(d);
+    // Start on DRY ground and walk the entire approach, not just a spawn
+    // already standing in water. The same steps must also permit retreat.
+    let a = s.point(-3), y = land.groundAt(...a);
+    for (let k = 1; k <= 55; k++) {
+      const d = -3 + k * .2, b = s.point(d);
       assert.equal(land.walkable(a[0], a[1], b[0], b[1], y, actor.bodyHeight, actor), true,
-        `actor blocked in safe shallows of sector ${i} at ${d.toFixed(1)}m`);
+        `actor blocked from dry land in sector ${i} at ${d.toFixed(1)}m`);
       a = b; y = land.groundAt(...b);
     }
     const deep = s.point(23);
     assert.equal(land.walkable(a[0], a[1], deep[0], deep[1], y, actor.bodyHeight, actor), false,
       `actor crossed deep-water safety gate in sector ${i}`);
+    for (let k = 54; k >= 0; k--) {
+      const d = -3 + k * .2, b = s.point(d);
+      assert.equal(land.walkable(a[0], a[1], b[0], b[1], y, actor.bodyHeight, actor), true,
+        `actor could not retreat to shore in sector ${i} at ${d.toFixed(1)}m`);
+      a = b; y = land.groundAt(...b);
+    }
   }
 });
 
