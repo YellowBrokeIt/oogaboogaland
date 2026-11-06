@@ -11,7 +11,7 @@
     for(let i=0;i<coast.length;i++){
       const a=coast[i],b=coast[(i+1)%coast.length],dx=b[0]-a[0],dz=b[1]-a[1],l2=dx*dx+dz*dz;
       const t=clamp(((x-a[0])*dx+(z-a[1])*dz)/l2,0,1),px=a[0]+dx*t,pz=a[1]+dz*t,d=(x-px)**2+(z-pz)**2;
-      if(d<best){best=d;out.x=px;out.z=pz;out.nx=dz/Math.sqrt(l2);out.nz=-dx/Math.sqrt(l2);out.segment=i;out.t=t;}
+      if(d<best){best=d;out.x=px;out.z=pz;const length=Math.sqrt(l2);out.nx=dz/length;out.nz=-dx/length;out.segment=i;out.t=t;out.length=length;}
     }
     out.distance=Math.sqrt(best);out.beach=beach(out.x,out.z);return out;
   };
@@ -25,9 +25,9 @@
     nearest(coast,x,z,out);
     const i=out.segment;
     if(blocked.has(i))return 0;
-    // Taper shelf to zero where an allowed shoreline meets an excluded edge.
-    const a=blocked.has((i+coast.length-1)%coast.length)?smooth(out.t/.4):1;
-    const b=blocked.has((i+1)%coast.length)?smooth((1-out.t)/.4):1;
+    // Fade the underwater shelf over the final 2 metres at each excluded boundary.
+    const a=blocked.has((i+coast.length-1)%coast.length)?smooth(out.t*out.length/2):1;
+    const b=blocked.has((i+1)%coast.length)?smooth((1-out.t)*out.length/2):1;
     return Math.min(a,b);
   };
   const shelfHeight=d=>.4-.13*d-.003*d*d-Math.max(0,d-13)**2*.35;
