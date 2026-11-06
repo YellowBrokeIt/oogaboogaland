@@ -18,7 +18,9 @@
   // Segment indices follow dsb-geography's authored coast polygon. Keep the working
   // harbor and Olympus rear face untouched; transition along neighboring segments.
   // The west flank between harbor and rear cliff remains eligible for wading.
-  const blocked=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
+  const REAR_OLYMPUS=[31,32,33,0,1,2,3,4,5];
+  const HARBOR=[22,23,24,25,26,27,28];
+  const blocked=new Set([...REAR_OLYMPUS,...HARBOR]);
   const wade=(coast,x,z,out={})=>{
     nearest(coast,x,z,out);
     const i=out.segment;
