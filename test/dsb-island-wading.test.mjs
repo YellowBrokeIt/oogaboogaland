@@ -86,6 +86,21 @@ test('eligible coasts have a gradual real seabed and allow real body-wide walkin
   }
 });
 
+test('dense quarter-sector paths work throughout the shoreline away from excluded boundaries', () => {
+  for (let i = 7; i <= 20; i++) {
+    for (const t of [.2, .5, .8]) {
+      const s = sector(i, t);
+      let a = s.point(-3), y = land.groundAt(...a);
+      for (let k = 1; k <= 55; k++) {
+        const d = -3 + k * .2, b = s.point(d);
+        assert.equal(land.walkable(a[0], a[1], b[0], b[1], y, actor.bodyHeight, actor), true,
+          `sector ${i} (${t}) blocked at ${d.toFixed(1)}m`);
+        a = b; y = land.groundAt(...b);
+      }
+    }
+  }
+});
+
 test('harbor and rear Olympus have no offshore shelf and prohibit walking into deep water', () => {
   for (const i of BLOCKED) {
     const s = sector(i), offshore = s.point(7);
