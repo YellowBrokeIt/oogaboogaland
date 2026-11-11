@@ -12,10 +12,14 @@ const url=pathToFileURL(resolve("oogaboogaland.html")).href+
   "?scene=dsb&debug=1&view=water-rocks";
 const viewpoints=[
   {name:"original-chora",sector:19},
+  {name:"chora-overhead-land",sector:19,depth:6,pitch:1.18,dist:39,yawSign:-1},
+  {name:"chora-overhead-sea",sector:19,depth:-3,pitch:1.1,dist:45,yawSign:1},
   {name:"east-rocks",sector:14},
   {name:"west-flank",sector:29},
   {name:"harbor-excluded",sector:24},
-  {name:"olympus-rear-excluded",sector:2,fromSea:true}
+  {name:"olympus-rear-excluded",sector:2,fromSea:true},
+  {name:"olympus-overhead-land",sector:2,depth:5,pitch:1.3,dist:72,yawSign:-1},
+  {name:"olympus-overhead-sea",sector:2,depth:-4,pitch:1.25,dist:84,yawSign:1}
 ];
 async function ready(browser,label) {
   let last;
@@ -87,15 +91,16 @@ async function check(browser,label,width,height){
       const a=coast[i],b=coast[(i+1)%coast.length],t=.5;
       const sx=a[0]+(b[0]-a[0])*t,sz=a[1]+(b[1]-a[1])*t,near={};
       window.BL.dsbCoast.nearest(coast,sx,sz,near);
-      const fromSea=${!!view.fromSea},depth=fromSea?-4:2;
+      const fromSea=${!!view.fromSea},depth=${view.depth??(view.fromSea?-4:2)};
       const x=sx-near.nx*depth,z=sz-near.nz*depth,y=d.land.heightAt(x,z);
-      const yaw=Math.atan2((fromSea?1:-1)*near.nx,(fromSea?1:-1)*near.nz);
-      window.__ooga.pilot.navigate({position:{x,y,z},yaw,pitch:.25,dist:fromSea?18:10});
+      const yawSign=${view.yawSign??(view.fromSea?1:-1)};
+      const yaw=Math.atan2(yawSign*near.nx,yawSign*near.nz);
+      window.__ooga.pilot.navigate({position:{x,y,z},yaw,pitch:${view.pitch??.25},dist:${view.dist??(view.fromSea?18:10)}});
       return {cameraReady:!!window.__ooga.camera,shore:[sx,sz],position:[x,y,z],
         wadingAllowed:window.BL.dsbCoast.wade(coast,sx,sz)>0};
     })()`);
     assert.equal(result.cameraReady,true,label+" "+view.name);
-    assert.equal(result.wadingAllowed,!view.fromSea&&view.name!=="harbor-excluded",
+    assert.equal(result.wadingAllowed,![0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33].includes(view.sector),
       label+" "+view.name+" access rule");
     console.log(label+" "+view.name+" camera="+JSON.stringify(result));
     await browser.sleep(950);
