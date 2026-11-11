@@ -31,3 +31,15 @@ jobs:
         run: npm run test:unit
       - name: Verify production single-page build
         run: npm run build
+      - name: Browser review at desktop and mobile viewport sizes
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)" 
+          test -x "$CHROME"
+          CHROME="$CHROME" node test/dsb-island-browser.mjs
+      - name: Upload shoreline browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: dsb-shoreline-browser-review
+          path: shoreline-browser-artifacts/*.png
+          if-no-files-found: ignore
