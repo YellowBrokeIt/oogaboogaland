@@ -1,0 +1,59 @@
+name: DSB PR600 final canonical validation
+on:
+  push:
+    branches: [validation/dsb-pr600-final-r3-20261111]
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: Canonical global tier, 583-plus checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Syntax, build and global tier
+        run: |
+          node --check test/run.mjs
+          node --check src/js/dsb-coast.js
+          node --check src/js/dsb-geography.js
+          node --check src/js/dsb-water.js
+          npm run build
+          npm run test:unit
+  water:
+    name: Original water, waterfall, harbor and pier regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Complete pre-existing DSB water lane
+        run: node test/run.mjs water-unit
+  browser:
+    name: Integrated desktop and phone DSB browser scenes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Run existing DSB scene assertions in Chrome desktop and phone
+        run: |
+          npm run build
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          ONLY="DSB shoreline" CHROME="$CHROME" node test/run.mjs --browser-only dsb
