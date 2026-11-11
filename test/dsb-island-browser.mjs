@@ -11,11 +11,11 @@ mkdirSync(shots,{recursive:true});
 const url=pathToFileURL(resolve("oogaboogaland.html")).href+
   "?scene=dsb&debug=1&view=water-rocks";
 const viewpoints=[
-  {name:"original-chora",x:20,z:80,yaw:Math.PI},
-  {name:"east-rocks",x:75,z:36,yaw:Math.PI/2},
-  {name:"west-flank",x:-78,z:25,yaw:-Math.PI/2},
-  {name:"harbor-excluded",x:-39,z:49,yaw:Math.PI},
-  {name:"olympus-rear-excluded",x:-54,z:-84,yaw:Math.PI}
+  {name:"original-chora",sector:19},
+  {name:"east-rocks",sector:14},
+  {name:"west-flank",sector:29},
+  {name:"harbor-excluded",sector:24},
+  {name:"olympus-rear-excluded",sector:2,fromSea:true}
 ];
 async function ready(browser,label) {
   let last;
@@ -73,14 +73,31 @@ async function check(browser,label,width,height){
   assert.equal(inspection.effectBudget,24);
   assert.ok(inspection.canvas[0]>0&&inspection.canvas[1]>0);
   console.log(label+" runtime checks: "+JSON.stringify(inspection));
+  // The donation drawer hides most of the desktop viewport. Hide it only in
+  // review screenshots; this does not change gameplay, layout code or saved UI.
+  await browser.evaluate(`(() => {
+    const drawer=document.getElementById('sheet');
+    if(drawer)drawer.style.setProperty('display','none','important');
+    const debug=document.getElementById('position-debug');
+    if(debug)debug.style.setProperty('display','none','important');
+  })()`);
   for(const view of viewpoints){
     const result=await browser.evaluate(`(() => {
-      const d=window.__ooga.dsb;
-      const x=${view.x},z=${view.z},y=d.land.heightAt(x,z);
-      window.__ooga.pilot.navigate({position:{x,y,z},yaw:${view.yaw},pitch:.19,dist:10});
-      return {cameraReady:!!window.__ooga.camera,landHeight:y};
+      const d=window.__ooga.dsb,coast=d.land.coast,i=${view.sector};
+      const a=coast[i],b=coast[(i+1)%coast.length],t=.5;
+      const sx=a[0]+(b[0]-a[0])*t,sz=a[1]+(b[1]-a[1])*t,near={};
+      window.BL.dsbCoast.nearest(coast,sx,sz,near);
+      const fromSea=${!!view.fromSea},depth=fromSea?-4:2;
+      const x=sx-near.nx*depth,z=sz-near.nz*depth,y=d.land.heightAt(x,z);
+      const yaw=Math.atan2((fromSea?1:-1)*near.nx,(fromSea?1:-1)*near.nz);
+      window.__ooga.pilot.navigate({position:{x,y,z},yaw,pitch:.25,dist:fromSea?18:10});
+      return {cameraReady:!!window.__ooga.camera,shore:[sx,sz],position:[x,y,z],
+        wadingAllowed:window.BL.dsbCoast.wade(coast,sx,sz)>0};
     })()`);
     assert.equal(result.cameraReady,true,label+" "+view.name);
+    assert.equal(result.wadingAllowed,!view.fromSea&&view.name!=="harbor-excluded",
+      label+" "+view.name+" access rule");
+    console.log(label+" "+view.name+" camera="+JSON.stringify(result));
     await browser.sleep(950);
     const path=resolve(shots,label+"-"+view.name+".png");
     await browser.screenshot(path);
