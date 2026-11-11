@@ -1,0 +1,23 @@
+name: Verify unmodified upstream Olympus water fingerprint
+on:
+  push:
+    branches: [validation/dsb-olympus-upstream-baseline-20261111]
+permissions:
+  contents: read
+jobs:
+  baseline:
+    name: Unmodified upstream DSB water baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Check upstream source without any shoreline patch
+        run: |
+          npm run build
+          DSB_TRACE=1 node test/run.mjs water-unit
