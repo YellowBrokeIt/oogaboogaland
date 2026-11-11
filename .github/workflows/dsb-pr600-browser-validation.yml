@@ -1,0 +1,25 @@
+name: DSB PR600 canonical browser scene
+on:
+  push:
+    branches: [validation/dsb-pr600-browser-canonical-20261111]
+permissions:
+  contents: read
+jobs:
+  dsb:
+    name: Desktop and phone DSB shoreline real-browser check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Build and verify canonical browser scenes
+        run: |
+          npm run build
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          ONLY="DSB shoreline" CHROME="$CHROME" node test/run.mjs --browser-only dsb
