@@ -1,0 +1,39 @@
+name: DSB PR600 canonical suite review
+on:
+  push:
+    branches: [validation/dsb-pr600-canonical-suite-20261111]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dsb-pr600-canonical-suite-review
+  cancel-in-progress: false
+jobs:
+  validate:
+    name: Canonical unit, water and desktop/phone DSB browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Syntax and real single-page production build
+        run: |
+          node --check test/run.mjs
+          node --check src/js/dsb-coast.js
+          node --check src/js/dsb-geography.js
+          node --check src/js/dsb-water.js
+          npm run build
+      - name: Canonical global unit lane including shoreline
+        run: npm run test:unit
+      - name: Detailed original water and harbor pier regressions
+        run: node test/run.mjs water-unit
+      - name: Built-page desktop and phone scene review via the canonical Chrome driver
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          ONLY="DSB shoreline" CHROME="$CHROME" node test/run.mjs --browser-only dsb
