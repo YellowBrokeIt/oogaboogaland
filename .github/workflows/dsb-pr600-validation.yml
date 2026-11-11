@@ -1,0 +1,41 @@
+name: Validate DSB PR600 against upstream integration
+on:
+  push:
+    branches: [validation/dsb-pr600-browser-20261111]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dsb-pr600-review-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  browser-validation:
+    name: Upstream-base shoreline, build, desktop and mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Focused 34-sector shoreline regression
+        run: node --test test/dsb-island-wading.test.mjs
+      - name: Full browser-free unit suite
+        run: npm run test:unit
+      - name: Rebuild actual integrated game page
+        run: npm run build
+      - name: Desktop and Android-sized Chromium gameplay smoke and visual capture
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          CHROME="$CHROME" node test/dsb-island-browser.mjs
+      - name: Upload reproducible screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr600-integration-desktop-phone-evidence
+          path: shoreline-browser-artifacts/*.png
+          if-no-files-found: ignore
