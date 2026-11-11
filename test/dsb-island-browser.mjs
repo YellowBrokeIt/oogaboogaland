@@ -26,7 +26,7 @@ async function ready(browser,label) {
       dsb:!!window.__ooga?.dsb?.land,
       water:!!window.__ooga?.dsb?.water,
       active:!!window.__ooga?.dsb?.waterInteraction,
-      canvas:!!document.querySelector('canvas'),
+      canvas:!!document.querySelector('#scene'),
       location:location.href
     }))()`).catch(e=>({error:String(e)}));
     if(last?.dsb&&last?.water&&last?.active&&last?.canvas)return;
@@ -60,11 +60,11 @@ async function check(browser,label,width,height){
           depthStops++;
       }
     }
-    const node=document.querySelector('canvas');
+    const node=document.querySelector('#scene');
     return {allowed,blocked,depthStops,viewport:[innerWidth,innerHeight],
       canvas:[node.width,node.height],effectBudget:d.waterInteraction.stats.capacity,
       waterTextures:d.water?.depths?.length,
-      controls:!!d.pilot,graphics:window.__ooga?.renderer?.kind||null};
+      controls:!!window.__ooga.pilot,graphics:window.__ooga?.renderer?.kind||null};
   })()`);
   assert.ok(!inspection.error,label+" "+JSON.stringify(inspection));
   assert.equal(inspection.allowed,18);
@@ -77,8 +77,8 @@ async function check(browser,label,width,height){
     const result=await browser.evaluate(`(() => {
       const d=window.__ooga.dsb;
       const x=${view.x},z=${view.z},y=d.land.heightAt(x,z);
-      d.pilot.navigate({position:{x,y,z},yaw:${view.yaw},pitch:.19,dist:10});
-      return {cameraReady:!!d.camera,landHeight:y};
+      window.__ooga.pilot.navigate({position:{x,y,z},yaw:${view.yaw},pitch:.19,dist:10});
+      return {cameraReady:!!window.__ooga.camera,landHeight:y};
     })()`);
     assert.equal(result.cameraReady,true,label+" "+view.name);
     await browser.sleep(950);
