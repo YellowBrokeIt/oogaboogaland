@@ -1,0 +1,33 @@
+name: DSB island shoreline validation
+
+on:
+  push:
+    branches: [feature/dsb-island-wading]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsb-island-wading-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shoreline:
+    name: Coast sectors, navigation and ocean optics
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Island-wide shoreline regression tests
+        run: node --test test/dsb-island-wading.test.mjs
+      - name: Full browser-free unit lane
+        run: npm run test:unit
+      - name: Verify production single-page build
+        run: npm run build
