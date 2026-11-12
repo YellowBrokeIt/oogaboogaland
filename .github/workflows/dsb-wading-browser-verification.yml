@@ -1,0 +1,54 @@
+name: DSB shoreline Chrome verification (temporary branch)
+
+on:
+  push:
+    branches:
+      - validation/dsb-wading-browser-031697ca
+
+permissions:
+  contents: read
+
+jobs:
+  dsb-browser:
+    name: DSB browser (real Ooga, desktop and mobile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Select installed Chrome
+        shell: bash
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          if [ -z "$CHROME_BIN" ]; then
+            echo "::error::No Chrome/Chromium binary installed on runner"
+            exit 1
+          fi
+          echo "CHROME=$CHROME_BIN" >> "$GITHUB_ENV"
+          "$CHROME_BIN" --version
+      - name: Build exact PR sources
+        run: |
+          npm run build
+          node --check src/js/dsb-coast.js
+          node --check src/js/dsb-geography.js
+          node --check src/js/dsb-water.js
+          node --check test/run.mjs
+          node --check test/browser.mjs
+      - name: Run existing DSB browser suite (real avatar, coast, mobile)
+        shell: bash
+        run: |
+          set -o pipefail
+          node test/run.mjs --browser-only dsb 2>&1 | tee "$RUNNER_TEMP/dsb-browser.log"
+      - name: Upload browser verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsb-browser-verification-031697ca
+          path: ${{ runner.temp }}/dsb-browser.log
+          if-no-files-found: warn
+          retention-days: 14
