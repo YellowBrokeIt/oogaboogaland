@@ -1,4 +1,4 @@
-name: DSB shoreline Chrome verification (temporary branch)
+name: PR600 focused Chrome shoreline verification (validation only)
 
 on:
   push:
@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  dsb-browser:
-    name: DSB browser (real Ooga, desktop and mobile)
+  shoreline-smoke:
+    name: 34-sector desktop and phone real-avatar browser checks
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -26,29 +26,30 @@ jobs:
         run: |
           CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
           if [ -z "$CHROME_BIN" ]; then
-            echo "::error::No Chrome/Chromium binary installed on runner"
+            echo "::error::Chrome not found"
             exit 1
           fi
           echo "CHROME=$CHROME_BIN" >> "$GITHUB_ENV"
           "$CHROME_BIN" --version
-      - name: Build exact PR sources
+      - name: Build game and check syntax
         run: |
           npm run build
+          node --check scripts/dsb-pr600-browser-validation.mjs
           node --check src/js/dsb-coast.js
           node --check src/js/dsb-geography.js
           node --check src/js/dsb-water.js
-          node --check test/run.mjs
-          node --check test/browser.mjs
-      - name: Run existing DSB browser suite (real avatar, coast, mobile)
+      - name: Run focused current-avatar browser regression (desktop and phone)
         shell: bash
         run: |
           set -o pipefail
-          node test/run.mjs --browser-only dsb 2>&1 | tee "$RUNNER_TEMP/dsb-browser.log"
-      - name: Upload browser verification log
+          node scripts/dsb-pr600-browser-validation.mjs 2>&1 | tee "$RUNNER_TEMP/dsb-pr600-smoke.log"
+      - name: Upload logs and 10 viewport screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dsb-browser-verification-031697ca
-          path: ${{ runner.temp }}/dsb-browser.log
+          name: dsb-pr600-real-avatar-browser
+          path: |
+            ${{ runner.temp }}/dsb-pr600-smoke.log
+            ${{ runner.temp }}/shoreline-browser-artifacts/*.png
           if-no-files-found: warn
           retention-days: 14
