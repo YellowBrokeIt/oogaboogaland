@@ -100,7 +100,7 @@
   // One visit's state: made in enter, dropped in leave.
   // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
   let home = "hub";
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent, marker;
+  let renderer, game, world, go, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent, marker;
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   // The pull altitude and the sink at touchdown, for the bonuses they earn.
   let pullAlt = 0, landSink = 0, life = null;
@@ -366,6 +366,7 @@
     cam.offset = cam.tilt = 0;
     audio.cues.pull();
     audio.cues.open();
+    BL.gamepad.rumble(0.55, 0.3, 180);
     cam.shake = Math.max(cam.shake, 0.4);
     fx.burst(diver.state.p.x, diver.state.p.y + 1.5, diver.state.p.z, 8, CLOUD_BITS, 2);
     return true;
@@ -411,6 +412,7 @@
     phase = "down";
     landedAt = sceneTime;
     const p = diver.state.p, crash = crashed(landing);
+    BL.gamepad.rumble(crash ? 1 : landing === "stand" ? 0.25 : 0.5, crash ? 0.8 : 0.35, crash ? 320 : 140);
     fx.burst(p.x, groundY + 0.1, p.z, crash ? 14 : 6, landing === "hole" ? DIRT_BITS : DUST_BITS, crash ? 2.4 : 1.2);
     if (landing === "hole") {
       setVec(hole.position, p.x, groundY + 0.01, p.z);
@@ -777,26 +779,15 @@
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     if (diver && diver.body.visible) {
       const p = diver.state.p;
       fx.burst(p.x, p.y + 1.2, p.z, 20, CONFETTI, 2.2);
     }
-    if (loot) {
-      game.addItem({ item: loot.item, tier: loot.tier, donationId: donation.id });
-      renderLocker();
-    }
     hud.setStats(game.state);
   };
-  const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  const onLootCleared = () => {
-    if (!lootEnabled) return;
-    renderLocker();
-    hud.toast("Loot locker cleared");
-  };
   // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
@@ -834,14 +825,14 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     hudMod.leaveTo("drop", home);
     camera = createCamera({ fov: 50, near: 0.4, far: 820 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -939,13 +930,6 @@
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
     window.addEventListener("keydown", onGesture, { signal: ctx.signal });
-    hud.onAssign((entryId, name) => {
-      if (game.assign(entryId, name)) renderLocker();
-    });
-    hud.onUnassign((name) => {
-      game.unassign(name);
-      renderLocker();
-    });
     Object.assign(hooks, {
       onHover: (hit, p) => {
         if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "diver" ? diver.cave : null);
@@ -973,16 +957,12 @@
       else if (action === "leave") go(home);
       else if (action === "act") act();
       else if (action === "mute") toggleMute();
-      else if (action === "clear-loot") {
-        game.clearLoot();
-        onLootCleared();
-      } else if (action === "reset") {
+      else if (action === "reset") {
         game.resetAll();
         location.reload();
       }
     });
     for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
-    if (lootEnabled) renderLocker();
     hud.setStats(game.state);
     dhud.el.help.textContent = controlCopy(COARSE);
     toBoard();
@@ -993,7 +973,7 @@
     Object.assign(dropScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null, agent: agent.debug,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -1111,11 +1091,11 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, rings: ringsHit, streaks: streaks.node.instanceCount };
   };
   const dropScene = BL.deferred.scene("drop", {
-    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    id: "drop", padContext: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     // The bare island is the cold visit's largest build, sliced behind the black hold; enter then adopts the completed,
     // scene-owned cache entry.
     buildSteps: () => terrain.islandSteps({ seed: SEED }),
-    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    enter, update, overlay, onDonation, onKey, leave, stats, liveGeometry,
     get inMotion() {
       return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
     }

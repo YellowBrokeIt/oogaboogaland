@@ -2,32 +2,43 @@
 // what a board holds and its limits, the original message, where the board stands, and the edits both sides apply
 // the same way. A board is `{ marks, points }`: marks in drawing order, each a chalk or eraser line (`t` "c" or
 // "e", width `s` 2 or 4, points `p` as x, y pairs from 0 to 1) or a typed character (`t` "t", `ch`, `p` its
-// baseline's start), and `points` their point count. An edit travels as small integers (thousandths of the board)
-// so a frame stays under the room's message limit:
-//   { k: "line", m, p }   a new line, chalk or eraser (`m` "c" or "e"), from its first points (2 to CHUNK of them)
+// baseline's start), and `points` their point count. An eraser line with `f` sweeps the eraser's footprint
+// (chalkboard.js), held sideways (1) or upright (2), and leaves a dusty smudge; one stored without it keeps its old wide band, so what it erased stays
+// erased. `f` is a field of its own, and `s` stays 4, so a page or room from before it still reads the board. An edit
+// travels as small integers (thousandths of the board) so a frame stays under the room's message limit:
+//   { k: "line", m, p }   a new line, chalk or eraser (`m` "c" or "e"), from its first points (2 to CHUNK of them);
+//                         an eraser held upright adds `o` 2
 //   { k: "more", p }      more points (1 to CHUNK) on the line the session last started
 //   { k: "type", c }      typed characters, up to TYPE_CHUNK [ch, x, y] triples
 //   { k: "back" }         takes back the session's last typed character, if it is still the last mark
 //   { k: "wipe", to }     "clean" leaves the board bare, "original" puts the original message back
 // A session is `{ open, from }`: the line the editor is drawing (-1 for none) and the mark count when it began, so
 // backspace never reaches anyone else's writing. Text is drawn on a canvas, never parsed as markup.
+// The board's layout is VERSION 2: half as wide and half as tall again as the first, with the first board's marks
+// in its middle (`widen`, which the room and the page apply once to what they stored before). Every chalk message a
+// page sends carries `v`, so the room never takes an older page's thousandths of the smaller board.
 (() => {
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const FEATURE = "chalk-v1";
+  const FEATURE = "chalk-v2", VERSION = 2;
   const MAX_MARKS = 550, MAX_POINTS = 10000, LINE_POINTS = 1000, CHUNK = 20, TYPE_CHUNK = 12;
   // Where the board stands on the island, its foot's middle and the way its face looks, and how near an Ooga's
   // feet must be to write: within REACH in front, within RISE of its foot. The hub places the board from the lab's
   // mouth and checks it matches this; the room checks the last pose a writer sent against it.
-  const AT = Object.freeze({ x: -4.079, y: 0, z: -20.566, frontX: -0.046, frontZ: 0.999 });
+  const AT = Object.freeze({ x: -4.279, y: 0, z: -20.231, frontX: 0.207, frontZ: 0.978 });
   const REACH = 2.4, RISE = 1.2;
   const near = (x, feet, z) => {
     const dx = x - AT.x, dz = z - AT.z;
     return dx * dx + dz * dz < REACH * REACH && dx * AT.frontX + dz * AT.frontZ > 0 && Math.abs(feet - AT.y) < RISE;
   };
-  // The original message: two rows of hand-drawn binary.
-  const initial = () => {
+  // A first-layout board's marks on this one: the old face is two thirds of the new one each way, in its middle, so
+  // what was drawn keeps its size and place on the board with a new margin all round.
+  const edge = (v) => (v * 4 + 1) / 6;
+  const widen = (marks) => marks.map((mark) => ({ ...mark, p: mark.p.map(edge) }));
+  // The original message: two rows of hand-drawn binary, drawn on the first board and widened like any other.
+  const initial = () => widen(first());
+  const first = () => {
     const marks = [];
     for (const [row, text] of ["01101010110", "11111101101"].entries()) {
       for (let i = 0; i < text.length; i++) {
@@ -68,7 +79,7 @@
       if (mark.t === "t") {
         if (!character(mark.ch) || mark.p.length !== 2) return null;
       } else if ((mark.t !== "c" && mark.t !== "e") || (mark.s !== undefined && mark.s !== 2 && mark.s !== 4)
-        || mark.p.length < 2 || mark.p.length % 2 || mark.p.length > LINE_POINTS * 2) return null;
+        || (mark.f !== undefined && ((mark.f !== 1 && mark.f !== 2) || mark.t !== "e")) || mark.p.length < 2 || mark.p.length % 2 || mark.p.length > LINE_POINTS * 2) return null;
       points += mark.p.length / 2;
       if (points > MAX_POINTS || !mark.p.every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1)) return null;
     }
@@ -79,7 +90,11 @@
   // An edit as it arrives from the network: a fresh, well-formed copy, or null.
   const parse = (op) => {
     if (!op || typeof op !== "object") return null;
-    if (op.k === "line") return (op.m === "c" || op.m === "e") && pairs(op.p, CHUNK) && op.p.length >= 4 ? { k: "line", m: op.m, p: op.p.slice() } : null;
+    if (op.k === "line") {
+      if ((op.m !== "c" && op.m !== "e") || !pairs(op.p, CHUNK) || op.p.length < 4) return null;
+      if (op.o !== undefined && ((op.o !== 1 && op.o !== 2) || op.m !== "e")) return null;
+      return op.o === 2 ? { k: "line", m: "e", o: 2, p: op.p.slice() } : { k: "line", m: op.m, p: op.p.slice() };
+    }
     if (op.k === "more") return pairs(op.p, CHUNK) ? { k: "more", p: op.p.slice() } : null;
     if (op.k === "type") {
       if (!Array.isArray(op.c) || !op.c.length || op.c.length > TYPE_CHUNK) return null;
@@ -97,7 +112,7 @@
     const marks = b.marks;
     if (op.k === "line") {
       if (marks.length >= MAX_MARKS || b.points + 2 > MAX_POINTS) return "full";
-      marks.push({ t: op.m, s: op.m === "c" ? 2 : 4, p: [] });
+      marks.push(op.m === "c" ? { t: "c", s: 2, p: [] } : { t: "e", s: 4, f: op.o === 2 ? 2 : 1, p: [] });
       s.open = marks.length - 1;
       return more(b, op.p, s);
     }
@@ -137,5 +152,5 @@
     }
     return null;
   };
-  BL.chalkBoard = Object.freeze({ FEATURE, MAX_MARKS, MAX_POINTS, LINE_POINTS, CHUNK, TYPE_CHUNK, AT, REACH, RISE, near, initial, preset, board, restore, parse, session, apply });
+  BL.chalkBoard = Object.freeze({ FEATURE, VERSION, MAX_MARKS, MAX_POINTS, LINE_POINTS, CHUNK, TYPE_CHUNK, AT, REACH, RISE, near, widen, initial, preset, board, restore, parse, session, apply });
 })();

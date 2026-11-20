@@ -23,7 +23,7 @@ const chunk = (kind, data) => {
 };
 
 // An 8-bit RGBA, non-interlaced PNG (the only kind the favicons are) as its pixels.
-const decode = (png) => {
+export const decode = (png) => {
   if (!png.subarray(0, 8).equals(SIGNATURE)) throw new Error("favicon: not a PNG");
   let w = 0, h = 0;
   const idat = [];
@@ -49,7 +49,7 @@ const decode = (png) => {
   }
   return { w, h, px };
 };
-const encode = (w, h, px) => {
+export const encode = (w, h, px) => {
   const raw = Buffer.alloc(h * (w * 4 + 1)), ihdr = Buffer.alloc(13);
   for (let y = 0; y < h; y++) px.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
@@ -57,7 +57,7 @@ const encode = (w, h, px) => {
 };
 
 // The touch icon: the mark scaled up by whole pixels, no smoothing, laid over `background` and centred.
-const touchIcon = (png, background) => {
+export const touchIcon = (png, background) => {
   const { w, h, px } = decode(png), out = Buffer.alloc(TOUCH * TOUCH * 4);
   const bg = [1, 3, 5].map((k) => parseInt(background.slice(k, k + 2), 16)), x0 = (TOUCH - w * TOUCH_SCALE) / 2, y0 = (TOUCH - h * TOUCH_SCALE) / 2;
   if (x0 < 0 || y0 < 0 || x0 % 1 || y0 % 1) throw new Error("favicon: the touch icon's mark does not fit");
@@ -71,7 +71,7 @@ const touchIcon = (png, background) => {
 };
 
 // An ICO directory of PNG images, each kept byte for byte.
-const ico = (pngs) => {
+export const ico = (pngs) => {
   const head = Buffer.alloc(6 + pngs.length * 16);
   head.writeUInt16LE(1, 2);
   head.writeUInt16LE(pngs.length, 4);
@@ -102,6 +102,8 @@ export function stageIcons(html, out) {
   const touchPath = join(out, "apple-touch-icon.png");
   const touch = existsSync(touchPath) ? readFileSync(touchPath) : touchIcon(found.find((p) => p.size === 64).bytes, theme[1]);
   for (const file of ["apple-touch-icon.png", "apple-touch-icon-precomposed.png"]) writeFileSync(join(out, file), touch);
+  // The portable page embeds its touch icon (scripts/build.mjs); a staged page links the file written above instead.
+  html = html.replace(/(<link rel="apple-touch-icon" sizes="\d+x\d+" href=")data:image\/png;base64,[^"]+(">)/, "$1/apple-touch-icon.png$2");
   let touchLinked = /<link\b[^>]*\brel="apple-touch-icon"/.test(html);
   return html.replace(ICONS, (_, size) => {
     const link = `<link rel="icon" type="image/png" sizes="${size}x${size}" href="/favicon-${size}.png">`;

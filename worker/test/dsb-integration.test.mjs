@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
 import * as studio from "../src/studio-policy.js";
-import { sfuClient } from "../src/sfu.js";
+import { sfuClient, turnCredentials } from "../src/sfu.js";
 import { getPlayer } from "../src/db.js";
 
 const zones = ["dsb-outside", "dsb-studio", "dsb-maxis", "dsb-without-rulers", "dsb-proof-of-ink", "dsb-big-bitcoin", "dsb-meme-factory", "dsb-stackchain", "dsb-svrn"];
@@ -26,14 +26,19 @@ const roomClass = (extra = {}) => {
   const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
-  const context = { ...protocol, ...studio, getPlayer, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout, ...extra };
+  const context = { ...protocol, ...studio, getPlayer, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, turnCredentials, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout, ...extra };
   runInNewContext(source, context);
+  // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off, as the
+  // constructor gives one without INSPECTOR_IDS.
+  context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
+  context.Room.prototype.world = protocol.worldReporter(null, {}, () => null);
   return context.Room;
 };
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: -45, y: 40, z: -43, yaw: 0 });
@@ -48,6 +53,8 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
   const g = [4, 1.8, 12.5, 1, -0.5, 0];
   room.scheduleFlush = () => {};
   room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: -45, y: 55, z: -43, yaw: 0.7, g }));
+  // Within a second of the body change the pose waits for the room's pose save (POSE_SAVE_MS).
+  clearTimeout(room.poseTimer); room.savePoses();
   assert.deepEqual(attachment.g, g);
   assert.deepEqual(room.view(player).g, g, "late joiners see the companion's current climbing stance");
   assert.equal(room.view(player).y, 55, "the room keeps an elevated companion pose");
@@ -70,8 +77,9 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
 
 test("room passes DSB wallets to the pages in their zone, and hands the live ones to whoever walks in", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), now = Date.now();
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
     const sent = [];
@@ -117,7 +125,8 @@ test("room passes DSB wallets to the pages in their zone, and hands the live one
 
 test("room carries an Ooga's jetpack to every page and drops it with the body", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.sockets = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: 0, y: 0, z: 0, yaw: 0 });
@@ -144,7 +153,8 @@ test("room carries an Ooga's jetpack to every page and drops it with the body", 
 
 test("room carries an Ooga's weapons and relays its shots and strikes to its own zone alone", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.sockets = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
     const sent = [], store = {};
@@ -186,14 +196,16 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   const stores = { 1: {}, 2: {} }, sockets = { 1: socket(1, stores[1]), 2: socket(2, stores[2]) };
   const wake = () => {
     const room = Object.create(Room.prototype);
+    room.sockets = new Map();
     room.sfu = {};
-    room.players = new Map(); room.chatBuckets = new Map();
+    room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
     for (const id of [1, 2]) if (stores[id].a) room.players.set(id, room.record(sockets[id], stores[id].a));
     return room;
   };
   const room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.sfu = {};
-  room.players = new Map(); room.chatBuckets = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
   for (const id of [1, 2]) {
     const p = room.record(sockets[id], { id, login: `p${id}`, display: `p${id}`, body: id === 1 ? "gorilla:ooga-1" : "ooga-2", g: id === 1 ? [4, 1.8, 12, 1, 0, 0] : null, zone: "factory.hall", x: 0, y: 0, z: 0, yaw: 0 });
     p.voice = { pub: `pub${id}`, sub: `sub${id}`, track: "mic", gen: 10 + id };
@@ -222,9 +234,11 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   assert.deepEqual(last(1), { t: "voice", peers: [2], gens: [99] }, "the tunnel and the hall share voice");
 });
 
-test("SFU stays unavailable without secrets and uses bounded upstream calls with mocked transport", async () => {
+test("SFU stays unavailable without secrets and uses bounded upstream calls with mocked transport", async t => {
   assert.equal(sfuClient({}), null);
   const original = globalThis.fetch, calls = [];
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", ms => { deadlines.push(ms); return new AbortController().signal; });
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => ({ sessionId: "fixture" }) }; };
   try {
     const client = sfuClient({ REALTIME_APP_ID: "fixture-app", REALTIME_SECRET: "fixture-only" });
@@ -233,14 +247,69 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
     assert.deepEqual(calls.map(c => c.options.method), ["POST", "POST", "PUT", "PUT"]);
     assert.ok(calls.every(c => c.url.startsWith("https://rtc.live.cloudflare.com/v1/apps/fixture-app/sessions/")));
     assert.equal(JSON.parse(calls[3].options.body).force, true);
+    await client.getSession("fixture");
+    assert.deepEqual(deadlines, [5000, 5000, 5000, 5000, 5000], "request-path SFU calls keep their existing deadlines");
+    await client.closeTracks("fixture", ["0"], true); await client.getSession("fixture", true);
+    assert.ok(deadlines[5] > 5000 && deadlines[5] < 10000 && deadlines[6] > 5000 && deadlines[6] < 10000,
+      "only background cleanup allows the longer transport response deadline");
+    globalThis.fetch = async () => ({ ok: false, status: 410, json: async () => ({ errorCode: "session_error" }) });
+    await assert.rejects(client.getSession("fixture"), err => err.status === 410 && err.code === "session_error",
+      "a terminal upstream response reaches cleanup instead of being obscured as a local timeout");
+  } finally { globalThis.fetch = original; }
+});
+
+test("TURN credentials require the active room token and return only a temporary TLS relay", async () => {
+  const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
+  const player = { id: 1, login: "YellowBrokeIt", connectionToken: "active" };
+  room.players = new Map([[1, player]]);
+  room.env = { REALTIME_APP_ID: "test-app", REALTIME_SECRET: "test-app-secret", REALTIME_TURN_KEY_ID: "test-key", REALTIME_TURN_TOKEN: "test-token" };
+  const request = token => new Request("https://example.test/voice/ice", { method: "POST", headers: { "x-player-id": "1", "x-room-token": token } });
+  const original = globalThis.fetch, calls = [], tls = "turns:turn.cloudflare.com:443?transport=tcp";
+  let replaced = false, moved = false;
+  globalThis.fetch = async (url, options) => {
+    // As workerd does: its fetch has no "error" redirect mode and throws on it.
+    if (options.redirect !== undefined && options.redirect !== "follow" && options.redirect !== "manual") throw new TypeError(`Invalid redirect value ${options.redirect}`);
+    calls.push({ url, options });
+    if (replaced) room.players.set(1, { id: 1, connectionToken: "replacement" });
+    if (moved) return new Response(null, { status: 307, headers: { location: "https://attacker.example/" } });
+    return Response.json({ iceServers: [{ urls: ["turn:turn.cloudflare.com:53?transport=udp", tls], username: "temporary", credential: "limited" }] });
+  };
+  try {
+    assert.deepEqual(await (await room.voiceRequest("ice", request("active"))).json(), {}, "relay stays disabled without its limiter");
+    room.env.VOICE_ICE_LIMITER = {};
+    assert.equal((await room.voiceRequest("ice", request("wrong"))).status, 409);
+    assert.equal(calls.length, 0);
+    const res = await room.voiceRequest("ice", request("active"));
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), { iceServers: [{ urls: tls, username: "temporary", credential: "limited" }], ttl: 7200 });
+    assert.equal(calls[0].url, "https://rtc.live.cloudflare.com/v1/turn/keys/test-key/credentials/generate-ice-servers");
+    assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
+    assert.equal(calls[0].options.redirect, "manual");
+    assert.equal(JSON.parse(calls[0].options.body).ttl, 7200);
+    room.env.REALTIME_TURN_TTL = "300";
+    assert.equal((await (await room.voiceRequest("ice", request("active"))).json()).ttl, 300);
+    assert.equal(JSON.parse(calls[1].options.body).ttl, 300);
+    moved = true;
+    assert.deepEqual(await (await room.voiceRequest("ice", request("active"))).json(), {}, "a redirect is no relay, never followed");
+    moved = false;
+    let evicted = false;
+    room.evict = (p, reason) => { evicted = p === player && reason === "revoked"; };
+    player.login = "not-a-contributor";
+    assert.equal((await room.voiceRequest("ice", request("active"))).status, 403);
+    assert.ok(evicted); assert.equal(calls.length, 3, "revoked accounts cannot mint relay credentials");
+    player.login = "YellowBrokeIt";
+    replaced = true;
+    assert.equal((await room.voiceRequest("ice", request("active"))).status, 409);
   } finally { globalThis.fetch = original; }
 });
 
 const studioRoom = () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
-  room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.sweepAt = 0;
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
+  room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.roomLocks = new Map(); room.sweepAt = 0;
   const pending = [], storage = new Map();
   room.ctx = { waitUntil: p => pending.push(p), storage: { put: async (k, v) => storage.set(k, structuredClone(v)), getAlarm: async () => null, setAlarm: async () => {} } };
   room.sfu = { closeTracks: async (_session, mids) => ({ tracks: mids.map(mid => ({ mid })) }), getSession: async () => ({ tracks: [] }) };
@@ -413,6 +482,51 @@ test("failed and uncertain closures retain durable cleanup ownership for retry",
   room.cleanupJobs[0].inspectUntil = 0; await room.retryCleanup(); assert.equal(room.cleanupJobs.length, 0);
 });
 
+test("an inspection timeout still closes known tracks and retains unknown allocations for recovery", async () => {
+  const { room, storage } = studioRoom(), closed = [];
+  room.sfu.getSession = async () => { throw new DOMException("Timed out", "TimeoutError"); };
+  room.sfu.closeTracks = async (_session, mids) => {
+    closed.push([...mids]);
+    return { tracks: mids.map(mid => ({ mid, errorCode: "close_track_error" })) };
+  };
+  await room.queueClose("uncertain", ["0"], true);
+  assert.deepEqual(closed, [["0"]], "a failed inspection cannot starve a known close");
+  assert.deepEqual(storage.get("voiceCleanup")[0].mids, [], "already-closed MIDs are not retried");
+  room.cleanupJobs[0].inspectUntil = 0;
+  await room.retryCleanup();
+  assert.equal(room.cleanupJobs.length, 1, "the elapsed inspection window does not make a timeout proof of absence");
+  assert.equal(closed.length, 1, "only the unresolved inspection is retried");
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "late", status: "active" }] });
+  room.sfu.closeTracks = async (_session, mids) => { closed.push([...mids]); return { tracks: mids.map(mid => ({ mid })) }; };
+  await room.retryCleanup();
+  assert.deepEqual(closed, [["0"], ["late"]], "recovered inspection accounts for the late allocation");
+  assert.deepEqual(storage.get("voiceCleanup"), []);
+
+  room.sfu.getSession = async () => { const error = new Error("gone"); error.status = 404; throw error; };
+  await room.queueClose("gone", ["1"], true);
+  assert.equal(closed.length, 2, "an explicitly absent session needs no close");
+  assert.equal(room.cleanupJobs.length, 0);
+});
+
+test("cleanup retires confirmed expired SFU sessions but keeps other failures", async () => {
+  const { room, storage } = studioRoom();
+  const fail = (status, code) => async () => { const error = new Error("fixture"); error.status = status; error.code = code; throw error; };
+  // Cloudflare documents 410 for `session_error` alone, so any 410 confirms it, its body's code or none (sfu.js `sessionGone`).
+  for (const [status, code] of [[410, "session_error"], [410, undefined], [410, "other"], [404, undefined]]) for (const inspect of [true, false]) {
+    room.sfu.getSession = fail(status, code);
+    room.sfu.closeTracks = fail(status, code);
+    await room.queueClose("expired", ["0"], inspect);
+    assert.equal(room.cleanupJobs.length, 0, "both inspection and close can confirm a retired session");
+    assert.deepEqual(storage.get("voiceCleanup"), []);
+  }
+  for (const [status, code] of [[425, "session_error"], [503, "session_error"], [0, undefined]]) {
+    room.sfu.getSession = fail(status, code); room.sfu.closeTracks = fail(status, code);
+    await room.queueClose("unresolved", ["0"], true);
+    assert.equal(room.cleanupJobs.length, 1, "an unrelated status/code must not release ownership");
+    assert.deepEqual([...room.cleanupJobs[0].mids], ["0"]);
+  }
+});
+
 test("receive-only Studio departure forcibly closes subscriptions and moderation survives reentry", async () => {
   const { room, add, pending } = studioRoom(), host = add(1), listener = add(2, { body: null });
   room.studio.hostId = 1; room.studio.mode = "discussion";
@@ -467,7 +581,7 @@ test("inspection retention never closes successful MIDs twice and partial result
     return { tracks: mids.map(mid => {
       assert.ok(active.has(mid), "must not close an already inactive MID");
       if (mid === "1" && first) return { mid, errorCode: "retry" };
-      active.delete(mid); return { mid };
+      active.delete(mid); return mid === "0" ? { mid, errorCode: "close_track_error" } : { mid };
     }) };
   };
   await room.queueClose("synthetic", ["0", "1"], true);
@@ -560,8 +674,9 @@ test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks co
 // Regression: a table voice choice survives hibernation, but never a scene change.
 test("room scopes poker voice to Ember Den and clears it on departure", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.sfu = {};
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.sfu = {};
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send() {} };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Fixture", body: "YellowBrokeIt", zone: "outside" });
@@ -614,7 +729,10 @@ test("a pull keeps still-eligible tracks, closes the rest through cleanup and re
   b.voice = { ...b.voice, pub: "pub-b", track: "mic", gen: 1 };
   c.voice = { ...c.voice, pub: "pub-c", track: "mic", gen: 1 };
   let answer; room.sfu.newTracks = () => new Promise(resolve => { answer = resolve; });
-  const closed = []; room.sfu.closeTracks = async (session, mids) => { closed.push([session, [...mids]]); return { tracks: mids.map(mid => ({ mid })) }; };
+  const closed = []; room.sfu.closeTracks = async (session, mids, background) => {
+    assert.equal(background, false, "a pull's inline close must not take the longer background deadline");
+    closed.push([session, [...mids]]); return { tracks: mids.map(mid => ({ mid })) };
+  };
   const request = call(listener, "pull", { ids: [1, 3, 4, 3] });
   await new Promise(resolve => setImmediate(resolve));
   b.pokerVoice = 2; // moved to another table while the SFU answered
@@ -686,6 +804,43 @@ test("the alarm wakes at the earliest of sweep, door expiry and cleanup retry, a
   await room.alarm();
   assert.equal(attempts, 1); assert.equal(room.cleanupJobs.length, 0); assert.equal(room.cleanupAt, 0);
   assert.equal(alarms.at(-1), room.sweepAt);
+});
+
+test("a new cleanup repairs an overdue registered alarm without postponing a healthy earlier wake", async () => {
+  const { room } = studioRoom(), writes = [];
+  const now = Date.now();
+  let registered = now - protocol.SWEEP_MS - 1;
+  room.ctx.storage.getAlarm = async () => registered;
+  room.ctx.storage.setAlarm = async at => { registered = at; writes.push(at); };
+  room.sfu.getSession = async () => { throw new Error("upstream unavailable"); };
+  await room.queueClose("uncertain", [], true);
+  assert.ok(writes[0] >= now, "a stale platform deadline is explicitly rearmed");
+  assert.equal(room.cleanupJobs.length, 1, "repairing the alarm never discards unresolved resources");
+  registered = Date.now() + 1000;
+  room.cleanupAt = Date.now() + protocol.SWEEP_MS;
+  writes.length = 0;
+  await room.scheduleAlarm();
+  assert.equal(writes.length, 0, "an earlier pending wake is preserved");
+});
+
+test("a slow cleanup pass advances the sweep from completion instead of scheduling another overdue alarm", async t => {
+  const { room, add } = studioRoom();
+  let now = Date.now(), registered;
+  t.mock.method(Date, "now", () => now);
+  add(1, { login: "YellowBrokeIt", body: "YellowBrokeIt" });
+  room.ctx.getWebSocketAutoResponseTimestamp = () => null;
+  room.ctx.storage.setAlarm = async at => { registered = at; };
+  room.sweepAt = now;
+  room.cleanupJobs = [{ session: "slow", at: now, mids: ["0"], revision: 0, midVersions: { 0: 0 } }];
+  room.sfu.closeTracks = async (_session, mids, background) => {
+    assert.equal(background, true, "the alarm's cleanup uses the longer background deadline");
+    now += protocol.SWEEP_MS + 1000;
+    return { tracks: mids.map(mid => ({ mid })) };
+  };
+  await room.alarm();
+  assert.equal(room.cleanupJobs.length, 0);
+  assert.equal(room.sweepAt, now + protocol.SWEEP_MS);
+  assert.equal(registered, room.sweepAt, "the next alarm is in the future after a long pass");
 });
 
 // Regression (#193 review): stored cleanup made SFU calls inside the constructor's blockConcurrencyWhile, where two
@@ -823,7 +978,10 @@ test("leave persists cleanup and notifies peers before its own SFU close complet
   listener.voice = { sub: "listener", mids: {} };
   room.updateVoice();
   let release; const blocked = new Promise(resolve => { release = resolve; });
-  room.sfu.closeTracks = async (_session, mids) => { await blocked; return { tracks: mids.map(mid => ({ mid })) }; };
+  room.sfu.closeTracks = async (_session, mids, background) => {
+    assert.equal(background, true, "deferred departure cleanup uses the longer background deadline");
+    await blocked; return { tracks: mids.map(mid => ({ mid })) };
+  };
   try {
     assert.equal((await call(player, "leave", {})).status, 200);
     assert.equal(listener.ws.sent.filter(m => m.t === "voice").at(-1).peers.length, 0);
@@ -847,4 +1005,42 @@ test("concurrent cleanup of one session closes newly queued MIDs before acknowle
   assert.equal(maximum, 1, "SFU mutations for one receiver remain serialized");
   assert.deepEqual(closed, [["0"], ["1"]]);
   assert.equal(room.cleanupJobs.length, 0);
+});
+
+test("a close queued while another is on its way never sweeps a session a listener still holds", async () => {
+  const { room, add } = studioRoom();
+  const listener = add(2, { zone: "outside" });
+  listener.voice = { ...listener.voice, sub: "receive", mids: { 2: 4, 3: 5 } };
+  const closed = []; let release;
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "2", status: "active" }, { mid: "3", status: "active" }] });
+  room.sfu.closeTracks = async (_session, mids) => { closed.push([...mids]); if (closed.length === 1) await new Promise(resolve => { release = resolve; }); return { tracks: mids.map(mid => ({ mid })) }; };
+  const first = room.queueClose("receive", ["0"]);
+  await new Promise(resolve => setImmediate(resolve));
+  const second = room.queueClose("receive", ["1"]);
+  await new Promise(resolve => setImmediate(resolve));
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(closed, [["0"], ["1"]], "the voices the listener still hears are left alone");
+  // A session nobody holds any more is still swept for whatever is left on it.
+  const swept = []; room.sfu.closeTracks = async (_session, mids) => { swept.push([...mids]); return { tracks: mids.map(mid => ({ mid })) }; };
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "7", status: "active" }] });
+  await room.queueClose("retired", [], true);
+  assert.deepEqual(swept, [["7"]]);
+});
+
+test("a speaker the room closed on a listener reads as new when it comes back, so the page pulls it again", () => {
+  const { room, add } = studioRoom();
+  const listener = add(2, { zone: "outside" }), speaker = add(4, { zone: "outside" });
+  room.sfu.closeTracks = async (_session, mids) => ({ tracks: mids.map(mid => ({ mid })) });
+  listener.voice = { ...listener.voice, sub: "receive", mids: { a: 4 } };
+  speaker.voice = { ...speaker.voice, pub: "pub", track: "mic", gen: 1 };
+  room.updateVoice();
+  const gens = () => listener.ws.sent.filter(m => m.t === "voice").at(-1).gens;
+  assert.deepEqual(gens(), [1]);
+  speaker.zone = "arcade.hall";
+  room.enforceStudio();
+  assert.deepEqual({ ...listener.voice.mids }, {}, "the room closed it");
+  speaker.zone = "outside";
+  room.updateVoice();
+  assert.deepEqual(gens(), [2], "the same publication, but no longer the track this page holds");
 });

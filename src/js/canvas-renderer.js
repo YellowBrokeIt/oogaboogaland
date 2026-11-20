@@ -53,12 +53,13 @@
   // wave tint across that surface for the frame, an accepted Canvas quality trade-off. Light is keyed as the 8-bit values the
   // paint uses (`shade`), so a sun creeping across the sky repaints only when the pixels would change. Eight reusable
   // slots share a 2,097,152-pixel budget, so the largest board (1200x540) fits beside the smaller ones; an evicted
-  // slot of the same size keeps its backing store. Oversized surfaces keep a single grow-only scratch image.
+  // slot of the same size keeps its backing store. Oversized surfaces (a Timechain room's 4096x1024 dome) keep a single
+  // grow-only scratch image, shaded once a frame for the surface its first face asks for, then reused by its other faces.
   const createSurfaceShadeCache = (paint) => {
     const MAX_PIXELS = 2048 * 1024;
     const entries = Array.from({ length: 8 }, () => ({ canvas: null, context: null, geometry: null, source: null, pixels: 0, used: 0, frame: -1,
       version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0, r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 }));
-    const fallback = { canvas: null, context: null };
+    const fallback = { canvas: null, context: null, geometry: null, source: null, frame: -1, version: 0, w: 0, h: 0, sourceW: 0, sourceH: 0, br: 0, bg: 0, bb: 0 };
     const shade = { r: 0, g: 0, b: 0, ar: 0, ag: 0, ab: 0 };
     let pixels = 0, clock = 0, frame = 0;
     const clear = entry => {
@@ -68,6 +69,10 @@
     };
     const channel = value => value > 0 ? Math.round(value * 255) : 0;
     const added = value => value > 0 ? Math.min(255, Math.round(value)) : 0;
+    // What an entry was shaded from, light aside: the surface, its content version and every dimension it is drawn at.
+    const holds = (entry, geometry, surface, source, w, h, br, bg, bb) => entry.geometry === geometry && entry.source === source
+      && entry.version === surface.version && entry.w === w && entry.h === h && entry.sourceW === source.width && entry.sourceH === source.height
+      && entry.br === br && entry.bg === bg && entry.bb === bb;
     const get = (geometry, rec, coverage) => {
       const surface = geometry.imageSurface, source = surface.canvas, w = surface.width || source.width, h = surface.height || source.height;
       const background = surface.background, br = background ? background[0] : -1, bg = background ? background[1] : -1, bb = background ? background[2] : -1;
@@ -75,14 +80,13 @@
       shade.ar = added(rec.canvasAddR); shade.ag = added(rec.canvasAddG); shade.ab = added(rec.canvasAddB);
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        if (entry.geometry === geometry && entry.source === source && entry.version === surface.version && entry.w === w && entry.h === h
-          && entry.sourceW === source.width && entry.sourceH === source.height
-          && entry.br === br && entry.bg === bg && entry.bb === bb
+        if (holds(entry, geometry, surface, source, w, h, br, bg, bb)
           && (entry.frame === frame || entry.r === shade.r && entry.g === shade.g && entry.b === shade.b
             && entry.ar === shade.ar && entry.ag === shade.ag && entry.ab === shade.ab)) {
           entry.used = ++clock; entry.frame = frame; return entry.canvas;
         }
       }
+      if (fallback.frame === frame && holds(fallback, geometry, surface, source, w, h, br, bg, bb)) return fallback.canvas;
       let entry = fallback;
       if (w * h <= MAX_PIXELS) {
         // This surface's own slot first, else the least recently used: forgetting a key keeps its backing store.
@@ -111,21 +115,24 @@
         if (entry.canvas.height !== h) entry.canvas.height = h;
       }
       paint(entry.canvas, entry.context, surface, shade, coverage);
+      entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
+      entry.sourceW = source.width; entry.sourceH = source.height;
+      entry.br = br; entry.bg = bg; entry.bb = bb; entry.frame = frame;
       if (entry !== fallback) {
-        entry.geometry = geometry; entry.source = source; entry.version = surface.version; entry.w = w; entry.h = h;
-        entry.sourceW = source.width; entry.sourceH = source.height;
-        entry.br = br; entry.bg = bg; entry.bb = bb;
         entry.r = shade.r; entry.g = shade.g; entry.b = shade.b;
         entry.ar = shade.ar; entry.ag = shade.ag; entry.ab = shade.ab;
-        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock; entry.frame = frame;
+        entry.pixels = w * h; pixels += entry.pixels; entry.used = ++clock;
       }
       return entry.canvas;
     };
     return { get,
       // Called once a frame before any surface draws.
       frame: () => { frame++; },
-      release: live => { for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry); },
-      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; },
+      release: live => {
+        for (const entry of entries) if (entry.geometry && !live.has(entry.geometry)) clear(entry);
+        if (fallback.geometry && !live.has(fallback.geometry)) fallback.geometry = fallback.source = null;
+      },
+      dispose: () => { for (const entry of entries) clear(entry); if (fallback.canvas) fallback.canvas.width = fallback.canvas.height = 0; fallback.geometry = fallback.source = null; },
       get pixels() { return pixels; }, get size() { let n = 0; for (const entry of entries) if (entry.geometry) n++; return n; } };
   };
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
@@ -150,6 +157,10 @@
     let cutawayCloudY = 0, cutawayCloudMix = 0;
     const pool = [];
     let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
+    // The WebGL renderer's `stats.info`, in the same shape: here a call is one painted polygon, all in the main pass.
+    // Triangles, instances, GL calls and GPU time do not apply to Canvas 2D and stay null.
+    const info = { calls: 0, triangles: null, instances: null, passes: {}, gl: null, gpuMs: null, gpuMsMean: null };
+    for (const name of ["shadow", "capture", "main", "post"]) info.passes[name] = { calls: 0, triangles: null, instances: null };
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
     let matrixCaves = null, matrixCaveBounds = null, matrixCaveNear = Infinity, matrixPermanentCave = 0, matrixPermanentPlane = null, matrixAperture = DEFAULT_MATRIX_APERTURE, matrixLivingGlobal = 1, matrixPointX = 0, matrixPointY = 0;
     const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
@@ -1847,7 +1858,7 @@
         imageVertices[at + 3] = (localX - rect[0]) / rect[2] * sw;
         imageVertices[at + 4] = (1 - (localY - rect[1]) / rect[3]) * sh;
       }
-      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = false;
+      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = !!surface.smooth;
       for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
         const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
         drawImageTriangle(shaded, imageVertices, a, b, d, 0, 0, width, height);
@@ -1906,6 +1917,7 @@
           (imageVertices[10] - imageVertices[0]) * scale / imageHeight,
           -(imageVertices[11] - imageVertices[1]) * scale / imageHeight, x, y);
         ctx.drawImage(image, 0, 0);
+        dimPicture(surface);
         ctx.restore();
         return;
       }
@@ -1914,10 +1926,23 @@
         drawImageTriangle(image, imageVertices, a, b, d, 0, 0, width, height);
         drawImageTriangle(image, imageVertices, a, d, c, 0, 0, width, height);
       }
+      dimPicture(surface);
       ctx.restore();
     };
+    // A picture, all but light added to the view, as dim as the scene asks (`pictureDim`): darkened inside its clip.
+    const dimPicture = (surface) => {
+      if (pictureDim >= 1 || surface.blend === "add") return;
+      const alpha = ctx.globalAlpha;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = alpha * (1 - pictureDim);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.globalAlpha = alpha;
+    };
+    let pictureDim = 1;
     const render = (root, camera, opts = {}) => {
       canvasShades.frame();
+      pictureDim = opts.pictureDim === undefined ? 1 : Math.max(0, Math.min(1, opts.pictureDim));
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
@@ -2036,6 +2061,7 @@
       }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       for (let i = 0; i < poolUsed; i++) active[i] = pool[sortIds[i]];
+      info.calls = info.passes.main.calls = poolUsed;
       matrixSampleStep = Math.max(1, Math.ceil(Math.sqrt(matrixArea / MATRIX_SAMPLE_BUDGET)));
       if (matrixArea) {
         let samples;
@@ -2265,6 +2291,7 @@
       project,
       ray,
       setQuality: () => { },
+      setScale: () => { },
       releaseGeometry: () => { },
       prepareScene: () => { },
       prepareGeometry: () => true,
@@ -2294,7 +2321,7 @@
         return "low";
       },
       get stats() {
-        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength, info };
       },
       get mirror() {
         return mirrorDebug;

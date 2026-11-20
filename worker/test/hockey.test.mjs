@@ -45,7 +45,9 @@ const harness = t => {
     return accepted[before];
   };
   const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "hockey" ? { v: 4, ...(msg.k === "join" ? { e: 0 } : {}), ...msg } : msg));
-  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.room=new context.Room(ctx,{});await initialized;return h.room;};
+  // A room hibernates only once its timers have run: the pose save fires (settle), the snapshot is dropped.
+  h.settle=()=>{if(h.room.poseTimer){clearTimeout(h.room.poseTimer);h.room.savePoses();}};
+  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.settle();h.room=new context.Room(ctx,{});await initialized;return h.room;};
   return h;
 };
 const W = protocol.HOCKEY;
@@ -97,7 +99,7 @@ test("an older live attachment is closed on wake and older clients cannot join o
   assert.equal(s.q,-1,"old host frames cannot drive a v4 match");
   h.send(b.ws,{t:"hockey",v:undefined,k:"input",i:0,s:s.s,q:0,x:1000,y:500});
   assert.equal(messages(a.ws).length,before,"old input cannot drive a v3 match");
-  a.ws.store.hockey.wire=3;await h.wake();
+  h.settle();a.ws.store.hockey.wire=3;await h.wake();
   assert.equal(h.room.hockeyTables[0],null,"legacy live attachment cannot restore");
   assert.equal(a.ws.store.hockey,null,"legacy attachment is cleared");
   assert.ok(messages(a.ws).some(m=>m.k==="table"&&m.phase==="closed"),"seats are notified of closure");
@@ -329,7 +331,7 @@ test("shared hockey presentation derives one solo Clanker and head scores from t
   const cave=()=>{const r=node(),head=node();head.geometry={};addChild(r,head);return {root:r,parts:{head,armR:node()},headOpen:{},headClosed:{}};};
   const humans=new Map([[1,cave()],[2,cave()]]);
   let now=10000;
-  const BL={hockeyWire:W,net:{state:{me:{id:1},body:"a",selfId:1},hockeyTables:tables,serverNow:()=>now},
+  const BL={hockeyWire:W,net:{state:{me:{id:3},body:"c",selfId:3},hockeyTables:tables,serverNow:()=>now},
     scene:{addChild,removeChild,createNode:opts=>Object.assign(node(),opts),boundsOf:()=>({min:[-.2,0,-.2],max:[.2,1,.2]})},
     models:{caveman:cave},contributors:{traitsFor:()=>({})},crew:{bodyHeightOf:()=>2},arcadeModels:{staffHat:()=>({})},
     agent:{create:()=>{const r=cave();r.poseManaged=(dt,x,y,z,yaw,speed)=>{Object.assign(r.root.position,{x,y,z});r.speed=speed;};r.dispose=()=>removeChild(root,r.root);r.liveGeometry=()=>{};rigs.push(r);return r;}}};
@@ -341,6 +343,10 @@ test("shared hockey presentation derives one solo Clanker and head scores from t
   now+=2400;view.update(.1);assert.equal(rigs[0].root.position.x,W.TABLES[0][0]);assert.equal(rigs[0].speed,0);
   const a=frame();a[8]=a[14]=2;a[9]=a[15]=3;tables[0].a=a;
   const scores=[],ctx={save(){},restore(){},strokeText(){},fillText:s=>scores.push(s)};view.draw(ctx,(x,y)=>({x,y}));assert.deepEqual(scores,["2","3"]);
+  // The hall visitor has already left even when the cached table still owns their old seat.
+  BL.net.state.selfId=1;scores.length=0;view.draw(ctx,(x,y)=>({x,y}));
+  assert.deepEqual(scores,["3"],"a stale seat cannot attach a hockey score to the returning visitor");
+  BL.net.state.selfId=3;
   tables[0].ids=[1,2];view.update(.1);assert.equal(root.children.length,0,"two humans never retain a Clanker");
   tables[0].ids=[1,0];view.update(.1);assert.equal(rigs[1].root.position.x,W.TABLES[0][0],"late viewers use server start time rather than replaying the approach");
   tables[0]=null;view.update(.1);assert.equal(root.children.length,0);
@@ -383,6 +389,40 @@ test("every video cabinet arbitrates simultaneous players, pins presence and rel
   for (const patch of [{ id: "race" }, { id: "hockey" }, { q: 0 }, { q: 1.5 }, { op: "steal" }]) {
     assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "cabinet", id: "mine", q: 1, op: "take", ...patch })), null);
   }
+  if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
+});
+
+test("a game's cave cabinet and hall cabinet seat two players at once, and a player only ever holds one", async t => {
+  const h = harness(t), a = await seat(h, 1, "a"), b = await seat(h, 2, "b");
+  h.send(a.ws, { t: "zone", name: "arcade.hall" });
+  h.send(b.ws, { t: "zone", name: "outside" });
+  const hall = { t: "cabinet", op: "take", id: "mine", q: 1 }, cave = { t: "cabinet", op: "take", id: "mine@out", q: 2, slot: 3 }, at = protocol.CABINETS.slot(3);
+  h.advance(1000);
+  await Promise.all([h.send(a.ws, hall), h.send(b.ws, cave)]);
+  assert.equal(h.room.players.get(1).cabinet.id, "mine");
+  assert.equal(h.room.players.get(2).cabinet.id, "mine@out");
+  const p = h.room.players.get(2);
+  assert.deepEqual([p.x, p.y, p.z, p.yaw, p.zone], [at.x, at.y, at.z, at.yaw, "outside"]);
+  // A player at a cave cabinet stays in the main island's voice: its islanders hear them and they hear its islanders, never the hall.
+  const hallSeat = h.room.players.get(1), mic = { sub: "listen", track: "mic" };
+  p.voice = hallSeat.voice = mic;
+  const island = { id: 3, body: "c", zone: "outside", voice: mic };
+  const peers = protocol.voicePeers([hallSeat, p, island]);
+  assert.deepEqual(peers.get(2), [3]);
+  assert.deepEqual(peers.get(3), [2]);
+  assert.deepEqual(peers.get(1), []);
+  // The cave's seat is still one player's, and one player holds one cabinet.
+  h.send(a.ws, { ...hall, op: "leave" });
+  h.advance(1000); h.send(a.ws, { t: "zone", name: "outside" }); h.send(a.ws, { ...cave, q: 3 });
+  assert.equal(h.room.players.get(1).cabinet, null);
+  assert.equal(a.ws.sent.filter(m => m.t === "cabinet").at(-1).ok, false);
+  h.send(b.ws, { ...cave, op: "leave" });
+  assert.equal(h.room.players.get(2).cabinet, null);
+  // A cave seat can only be taken from outside, at a real slot.
+  h.advance(1000); h.send(a.ws, { t: "zone", name: "arcade.hall" }); h.send(a.ws, { ...cave, q: 4 });
+  assert.equal(h.room.players.get(1).cabinet, null);
+  for (const patch of [{ slot: undefined }, { slot: 4 }, { slot: 1.5 }, { slot: "0" }, { id: "race@out" }])
+    assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "cabinet", id: "mine@out", q: 1, op: "take", slot: 0, ...patch })), null);
   if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
 });
 

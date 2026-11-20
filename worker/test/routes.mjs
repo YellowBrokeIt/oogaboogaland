@@ -6,10 +6,16 @@ import * as cookies from "../src/cookies.js";
 import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
 import * as highscoreStore from "../src/highscore-store.js";
-import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
+import { createOwnedCharacterLookup, oogatron } from "../src/contributor-policy.js";
+import { turnConfigured } from "../src/sfu.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
+import "../../src/js/arcade-cabinets.js";
 import "../../src/js/cloud-hopper-replay-codec.js";
+import { GAME_KINDS, gameName } from "../src/games.js";
+import * as inspectReport from "../src/inspect-report.js";
+import * as cpuModel from "../src/cpu-model.js";
+import { PAGE } from "../src/inspect-page.js";
 
 const load = (name, dependencies, exports) => {
   const url = new URL(`../src/${name}.js`, import.meta.url);
@@ -31,15 +37,21 @@ lookup = async () => null, fetcher = async () => { throw new Error("Unexpected n
 anthropic = class { constructor() { throw new Error("Unexpected Claude call"); } }, facts = TESS_FACTS } = {}) => {
   const access = load("contributor-access", { CAST_ROWS: cast,
     createOwnedCharacterLookup: (rows) => createOwnedCharacterLookup(rows, lookup) }, ["contributorFor"]);
-  const http = load("http", { ...cookies, ...db, ...access }, ["json", "text", "redirect", "fromSite", "safeNext",
-    "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval"]);
-  const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, fetch: fetcher }, ["handleAuth"]);
-  const api = load("api", { ...cookies, ...db, ...http }, ["handleApi"]);
+  const http = load("http", { ...cookies, ...db, ...access, oogatron }, ["json", "text", "redirect", "fromSite", "safeNext",
+    "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval", "readBody"]);
+  const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, oogatron, fetch: fetcher }, ["handleAuth"]);
+  const api = load("api", { ...cookies, ...db, ...http, turnConfigured, GAME_KINDS }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
   const replayStore = load("cloud-hopper-replay-store", {}, ["winnerSQL", "liveSQL", "winnerReplay", "pruneCloudHopperReplays"]);
   const highscores = load("highscores", { ...http, ...highscoreStore, ...replayStore }, ["handleHighscores", "createHighscoreHandler", "readScores", "improve"]);
   const replays = load("cloud-hopper-replays", { ...http, ...replayStore, ...highscores }, ["handleCloudHopperReplays", "createReplayHandler"]);
-  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore }, ["worker"]);
-  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...main };
+  const plays = load("arcade-plays", http, ["handleArcadePlays", "createPlaysHandler", "countPlay", "readPlays"]);
+  const reports = load("connection-reports", http, ["handleConnectionReports", "createConnectionReportHandler", "validConnectionReport", "pruneConnectionReports"]);
+  const inspect = load("inspect", { ...http, ...inspectReport, PAGE }, ["handleInspect"]);
+  const worldReport = load("world-report", {}, ["WORLD_NAME", "worldReporter"]);
+  const world = load("world", { ...http, ...inspectReport, ...cpuModel, ...worldReport }, ["handleWorld", "createWorldHandler", "handleWorldLive", "createWorldLiveHandler",
+    "answerFor", "REFRESH_MS", "LIVE_MS", "EMPTY_MS", "RETRY_S"]);
+  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, ...reports, ...inspect, ...world, inspectEdge: inspectReport.inspectEdge, gameName }, ["worker"]);
+  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, ...reports, ...inspect, ...worldReport, ...world, ...main };
 };

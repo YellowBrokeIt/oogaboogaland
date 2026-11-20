@@ -1,7 +1,7 @@
 // Pure checks on the room's wire format and limits: no Durable Object, no sockets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { castIndex, claimRefusal, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_LIMITS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
+import { castIndex, claimRefusal, DANCE_MAX, BOUND_XZ, BOUND_Y_MIN, BOUND_Y_MAX, CHALK, VISUAL_BODY, VISUAL_LIMITS, VISUAL_LOWS, MESSAGE_MAX, MOVE_HZ, parseClientMessage, playerFromHeaders, spawnPoint, takeToken } from "../src/protocol.js";
 
 test("poses inside the bounds are accepted, rounded and their yaw wrapped", () => {
   const m = parseClientMessage(JSON.stringify({ t: "pose", x: 1.23456, y: -7, z: 3, yaw: 7 }));
@@ -20,8 +20,16 @@ test("poses inside the bounds are accepted, rounded and their yaw wrapped", () =
   assert.equal("w" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 25, z: 0, yaw: 0, w: 0 })), false, "empty hands add nothing");
 });
 
+test("a dance number rides the pose from 0 to its most, and anything else drops the pose", () => {
+  const pose = (d) => parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, d }));
+  assert.equal(pose(0).d, 0, "standing still is said too, so it differs from a page that says nothing");
+  assert.equal(pose(DANCE_MAX).d, DANCE_MAX);
+  assert.equal("d" in parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0 })), false, "an older page's pose has none");
+  for (const d of [-1, DANCE_MAX + 1, 2.5, "3", null]) assert.equal(pose(d), null, `level ${JSON.stringify(d)} is refused`);
+});
+
 test("presentation phases are bounded integers and fit the existing pose envelope", () => {
-  const v = VISUAL_LIMITS.map((n, i) => i < 3 ? -n : n);
+  const v = VISUAL_LIMITS.map((n, i) => VISUAL_LOWS[i] < 0 ? VISUAL_LOWS[i] : n);
   const wire = JSON.stringify({ t: "pose", x: -159.999, y: -129.999, z: -159.999, yaw: -3.142, j: 7, w: 255, v });
   assert.ok(wire.length <= MESSAGE_MAX, "the largest bounded Ooga sample must not close its socket");
   assert.deepEqual(parseClientMessage(wire).v, v);
@@ -32,7 +40,9 @@ test("presentation phases are bounded integers and fit the existing pose envelop
   for (const r of [null, [], [0, 1, 0], [1, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 4, 0, 0, 0, 0], [0, 1, 256, 0, 0, 0], [0, 1, 0, 1001, 0, 0], [0, 1, 0, 1000, 1000, 1000], [0, 1, 0, 0.5, 0, 0]])
     assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, r })), null, "malformed rest never reserves a seat");
   assert.equal("v" in parseClientMessage('{"t":"pose","x":0,"y":0,"z":0,"yaw":0}'), false);
-  for (const bad of [null, [], v.slice(1), [...v, 0], v.map((n, i) => i === 3 ? 8192 : n), v.map((n, i) => i === 4 ? -1 : n), v.map((n, i) => i === 0 ? 150.5 : n)]) {
+  assert.deepEqual(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, v: v.slice(0, VISUAL_BODY) })).v, v.slice(0, VISUAL_BODY), "an older page's pose, without the body's own, still rides");
+  for (const bad of [null, [], v.slice(1), [...v, 0], v.slice(0, VISUAL_BODY + 1), v.map((n, i) => i === 3 ? 8192 : n), v.map((n, i) => i === 4 ? -1 : n), v.map((n, i) => i === 0 ? 150.5 : n),
+    v.map((n, i) => i === 17 ? 2629 : n), v.map((n, i) => i === 18 ? -51 : n)]) {
     assert.equal(parseClientMessage(JSON.stringify({ t: "pose", x: 0, y: 0, z: 0, yaw: 0, v: bad })), null);
   }
 });
@@ -162,7 +172,7 @@ test("voice: players driving an Ooga hear each other while in the same place; no
   const players = [
     p(1, "bc1gui", "outside"), p(2, "portlandhodl", "outside"), p(3, "w-s-bitcoin", "cave-lab"),
     p(4, null, "outside"), p(5, "MrHodlX", "outside", { pub: null, sub: "s", track: null }), p(6, "DrNeski", "outside", { pub: "p", sub: null, track: "mic" }),
-    p(7, "timechainb", "cave-lab"), p(8, "Tmmmemcee", "hq"),
+    p(7, "timechainb", "cave-lab"), { ...p(8, "Tmmmemcee", "hq"), blendTo: "hq", blendK: 20 },
   ];
   const peers = voicePeers(players);
   assert.deepEqual(peers.get(1), [2, 6]);
@@ -188,13 +198,14 @@ test("voice zones: a group shares voice across its places; nobody is heard from 
   const { voicePeers, parseClientMessage, zoneGroup } = await import("../src/protocol.js");
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone) => ({ id, body: `ooga-${id}`, zone, voice: on });
-  const peers = voicePeers([p(1, "factory"), p(2, "factory.hall"), p(3, "outside"), p(4, "sphere"), p(5, "none"), p(6, "none"), p(7, "bifrost"), p(8, "bifrost.chamber")]);
-  assert.deepEqual(peers.get(1), [2], "the Factory's tunnel hears its hall");
+  const peers = voicePeers([p(1, "factory.hangar"), p(2, "factory.hall"), p(3, "outside"), p(4, "sphere"), p(5, "none"), p(6, "none"), p(7, "bifrost"), p(8, "bifrost.chamber")]);
+  assert.deepEqual(peers.get(1), [2], "the Factory's hangar hears its hall");
   assert.deepEqual(peers.get(2), [1]);
-  assert.deepEqual(peers.get(3), [], "the island does not hear a bridged land");
-  assert.deepEqual(peers.get(4), []);
-  assert.deepEqual(peers.get(5), [], "off the island's edge hears nobody, not even another off it");
-  assert.deepEqual(peers.get(7), [8], "the Bifrost isle hears its chamber");
+  assert.deepEqual(peers.get(3), [4, 7], "the main world's surface is one place, whatever the zone");
+  assert.deepEqual(peers.get(4), [3, 7]);
+  assert.deepEqual(peers.get(5), [], "between scenes hears nobody, not even another between them");
+  assert.deepEqual(peers.get(7), [3, 4], "the Bifrost isle is on the surface");
+  assert.deepEqual(peers.get(8), [], "and its chamber a room of its own");
   assert.equal(zoneGroup("arcade.hall"), "arcade");
   assert.equal(zoneGroup("dsb-studio"), "dsb-studio");
   assert.deepEqual(parseClientMessage('{"t":"zone","name":"factory.hall"}'), { t: "zone", name: "factory.hall" });
@@ -202,24 +213,33 @@ test("voice zones: a group shares voice across its places; nobody is heard from 
   assert.equal(parseClientMessage('{"t":"zone","name":".hall"}'), null);
 });
 
-test("Sphere rooms isolate voice by number and doorway frames are strictly bounded", async () => {
+test("Sphere rooms 0–9 isolate voice by number, only the Conference Room locks, and doorway frames are strictly bounded", async () => {
   const { voicePeers } = await import("../src/protocol.js");
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone) => ({ id, body: `ooga-${id}`, zone, voice: on });
-  const peers = voicePeers([p(1, "sphere-1"), p(2, "sphere-1"), p(3, "sphere-2"), p(4, "sphere"), p(5, "sphere-9")]);
+  const peers = voicePeers([p(1, "sphere-1"), p(2, "sphere-1"), p(3, "sphere-2"), p(4, "sphere"), p(5, "sphere-9"), p(6, "sphere-0"), p(7, "sphere-0")]);
   assert.deepEqual(peers.get(1), [2]);
   assert.deepEqual(peers.get(2), [1]);
   assert.deepEqual(peers.get(3), []);
   assert.deepEqual(peers.get(4), []);
   assert.deepEqual(peers.get(5), []);
+  assert.deepEqual(peers.get(6), [7], "room 0 is a room of its own too");
 
   assert.deepEqual(parseClientMessage('{"t":"door","op":"ask","dir":"in","room":7}'), { t: "door", op: "ask", dir: "in", room: 7 });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"ask","dir":"out","room":0}'), { t: "door", op: "ask", dir: "out", room: 0 });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-0","dir":"in"}'), { t: "door", op: "pass", door: "sphere-0", dir: "in" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"go","cycle":"abc_123"}'), { t: "door", op: "go", cycle: "abc_123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"done","cycle":"abc-123"}'), { t: "door", op: "done", cycle: "abc-123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"cancel","extra":true}'), { t: "door", op: "cancel" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-9","dir":"out"}'), { t: "door", op: "pass", door: "sphere-9", dir: "out" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":0,"pin":"0042"}'), { t: "door", op: "lock", room: 0, pin: "0042" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":0,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 0, pin: "1234" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":0}'), { t: "door", op: "unlock", room: 0 });
+  for (const bad of ['{"t":"door","op":"lock","room":0,"pin":"123"}', '{"t":"door","op":"try","room":0}']) assert.equal(parseClientMessage(bad), null);
+  // Every other room has no lock to set, try or open.
+  for (const room of [1, 2, 3, 4, 5, 6, 7, 8, 9]) for (const op of ["lock", "try", "unlock"]) assert.equal(parseClientMessage(JSON.stringify({ t: "door", op, room, pin: "1234" })), null, `${op} room ${room}`);
   for (const bad of [
-    { t: "door", op: "ask", dir: "in", room: 0 }, { t: "door", op: "ask", dir: "side", room: 1 },
+    { t: "door", op: "ask", dir: "in", room: 10 }, { t: "door", op: "ask", dir: "in", room: -1 }, { t: "door", op: "ask", dir: "side", room: 1 },
     { t: "door", op: "go", cycle: "bad cycle" }, { t: "door", op: "done", cycle: "x".repeat(65) },
     { t: "door", op: "pass", door: "sphere-10", dir: "in" }, { t: "door", op: "pass", door: "sphere-1", dir: "side" },
     { t: "door", op: "open" },
@@ -279,8 +299,11 @@ test("NPC followers: every other page showing the island, so a lone host sends n
 });
 
 test("chalkboard edits are small integers in frames under the limit, refused whole when malformed", () => {
-  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", ...m }));
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", v: CHALK.VERSION, ...m }));
   assert.deepEqual(parse({ k: "take" }), { t: "chalk", k: "take" });
+  // A page on the first, smaller board sends no layout: none of its frames are taken.
+  for (const v of [undefined, 1, "2"]) assert.equal(parse({ v, k: "take" }), null, `layout ${v}`);
+  assert.equal(parseClientMessage(JSON.stringify({ t: "chalk", k: "line", m: "c", p: [1, 2, 3, 4] })), null);
   assert.deepEqual(parse({ k: "drop", extra: 1 }), { t: "chalk", k: "drop" });
   assert.deepEqual(parse({ k: "line", m: "e", p: [1, 2, 3, 4] }), { t: "chalk", k: "line", m: "e", p: [1, 2, 3, 4] });
   assert.deepEqual(parse({ k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] }), { t: "chalk", k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] });
@@ -290,8 +313,8 @@ test("chalkboard edits are small integers in frames under the limit, refused who
     { k: "type", c: [] }, { k: "wipe", to: "all" }, { k: "steal" }])
     assert.equal(parse(bad), null, JSON.stringify(bad));
   // The page's fullest frames: a line's chunk at the board's far corner, and a chunk of characters JSON escapes.
-  const line = JSON.stringify({ t: "chalk", k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
-  const typed = JSON.stringify({ t: "chalk", k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
+  const line = JSON.stringify({ t: "chalk", v: CHALK.VERSION, k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
+  const typed = JSON.stringify({ t: "chalk", v: CHALK.VERSION, k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
   assert.ok(line.length <= MESSAGE_MAX && typed.length <= MESSAGE_MAX, `${line.length} ${typed.length}`);
   assert.equal(parseClientMessage(line).p.length, CHALK.CHUNK * 2);
 });

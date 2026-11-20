@@ -17,9 +17,6 @@
   const RALLY_TEST = DEBUG && WIP === "race";
   for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id) delete scenes[id];
   for (const slot of window.BL.caves.slots) if (slot.scene && !scenes[slot.scene]) Object.assign(slot, { scene: null, status: "dark" });
-  // Loot crates, locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
-  const LOOT_DEFAULT = false;
-  const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
   const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
     ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedBananas))
@@ -64,25 +61,51 @@
   const worldClock = $("world-clock"), soundButton = $("environment-sound");
   const sound = window.BL.sound;
   const showSound = () => {
-    const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
-    const voice = window.BL.voice.stats;
-    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
-    soundButton.setAttribute("aria-pressed", String(sound.muted));
+    const voice = window.BL.voice.stats, label = sound.muted ? "Sound levels (game sounds muted)" : "Sound levels";
+    soundButton.setAttribute("aria-label", label);
+    soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M mutes game sounds`;
+    soundButton.dataset.muted = String(sound.muted);
   };
+  BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition });
   let helpHeld = false;
+  // Both panels pause the scene. A pad keeps working inside them: its Menus context reaches no scene while they show.
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
-    hold: on => { helpHeld = on; rightShift = false; gamepad.hold(on); } });
+    hold: on => { helpHeld = on; rightShift = false; } });
+  const padSettings = BL.padSettings.install(BL.padSettings.create({ current: () => active, ready: () => !!active && !transition,
+    hold: on => { helpHeld = on; rightShift = false; BL.controls.resetAll(); } }));
+  // The controller's own news: named the first time it is used, offered setup when the browser can't read it, and in
+  // a game, losing it pauses the game. View and Menu together open its screen.
+  let padNamed = "";
+  const offPad = gamepad.subscribe((what) => {
+    const hud = window.BL.hud, st = gamepad.state;
+    if (what === "settings") padSettings.open();
+    else if (what === "device" && st.connected && st.id !== padNamed) {
+      padNamed = st.id;
+      hud.toast(`${gamepad.nameOf(st.id)} ready · ${gamepad.glyph("view")} + ${gamepad.glyph("menu")} for controller settings`);
+    } else if (what === "unknown") {
+      hud.toast(`${gamepad.nameOf(st.unknown)} needs a one-time setup`);
+      padSettings.open({ setup: true });
+    } else if (what === "disconnected") {
+      const pause = gamepad.CONTEXTS[gamepad.context]?.pauseKey;
+      if (pause && active && !transition) gamepad.tap(pause);
+      hud.toast("Controller disconnected");
+    }
+  });
   const offSound = sound.subscribe(showSound);
-  soundButton.addEventListener("click", sound.toggle);
+  // The button's press opens each sound's level (sound-panel.js); M mutes.
+  const soundPanel = window.BL.soundPanel.create({ button: soundButton });
   showSound();
   // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
   const onVoiceMuteKey = (e) => {
     const voice = window.BL.voice;
-    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining) return;
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining && !voice.stats.returning) return;
     if (e.target && (e.target.isContentEditable || e.target.closest && e.target.closest("input, textarea, select"))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!e.repeat) voice.setMuted(!voice.stats.muted);
+    if (e.repeat) return;
+    // Back from an earlier session the microphone is still closed, so M opens it as Unmute does.
+    if (voice.stats.returning) voice.toggle();
+    else voice.setMuted(!voice.stats.muted);
   };
   window.addEventListener("keydown", onVoiceMuteKey, true);
   let renderer = null;
@@ -113,11 +136,17 @@
     }
   }
   mark("renderer");
-  const game = gameMod.create({ catalog: models.SWAG });
+  const game = gameMod.create();
   window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
     if (donations.real) return;
     deliverDonation(donation);
     window.BL.hud.setDonationStats(game.state);
+  }, {
+    login: () => window.BL.net.state.me?.login,
+    bananasFor: gameMod.bananasFor,
+    price: () => window.BL.chain.snapshot.priceUsd,
+    // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
+    link: () => routerMod.served ? `${location.origin}/donate` : `${location.href.split("#")[0]}#/donate`
   });
   window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
@@ -231,7 +260,8 @@
       }
       const glyph = window.BL.hubModels.SIGN_GLYPHS[ch];
       if (!glyph) throw new Error(`No clock glyph for "${ch}"`);
-      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+      const sx = 3 / glyph[0].length, pixel = 0.82 * sx;
+      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col * sx} ${row}h${pixel}v.82h-${pixel}z`;
       cursor += 4;
     }
     const cells = cursor - 1;
@@ -267,6 +297,9 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
+    // Leaving a scene leaves the public outdoor scope at once, before the fade, and stays out of it until the transition
+    // settles, whatever the old scene's last frames report (outdoor-scope.js `hold`); the next scene reports after.
+    window.BL.outdoorScope.hold(true);
     controlsHelp.close();
     transition = { next, place, out: true, t: 0, held: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
@@ -286,10 +319,23 @@
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
   cabinetView = window.BL.arcadeView.create({ canvas: sceneCanvas, renderer, go });
   ctx.cabinet = cabinetView;
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
+  // The banner's line under its title says where the visitor is (zone-map.js `line`) in every place that carries
+  // `data-zone-line`; a game keeps its own words. A line's own markup (the Arcade's abbreviation on a phone) stands
+  // whenever it says the same thing.
+  const zoneLines = new Map(Array.from(document.querySelectorAll("[data-zone-line]"), (el) => [el, el.cloneNode(true)]));
+  let zoneLine = null, zoneLineFor = "";
+  const showZoneLine = () => {
+    const zone = window.BL.net.state.zone;
+    if (!zoneLine || zone === zoneLineFor) return;
+    zoneLineFor = zone;
+    const text = window.BL.zoneMap.line(zone), home = zoneLines.get(zoneLine);
+    if (text === home.textContent) zoneLine.replaceChildren(...home.cloneNode(true).childNodes);
+    else zoneLine.textContent = text;
+  };
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
   const intros = [...document.querySelectorAll("[data-intro]")];
@@ -298,21 +344,25 @@
   const openIntro = () => { for (const el of intros) if (!el.hidden) return el; return null; };
   const showMic = () => {
     const voice = window.BL.voice.stats;
-    window.BL.hud.showMic(voice, voice.enabled || voice.joining);
+    window.BL.hud.showMic(voice, voice.enabled || voice.joining || voice.returning);
     showSound();
   };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
   // `enterSteps` may run its enter in slices between them (see `swap`).
-  const arcadeScenes = new Set([...window.BL.arcadeCabinets.entries.map(c => c.id), "race", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride"]);
+  const arcadeScenes = new Set([...window.BL.arcadeCabinets.entries.map(c => c.id), "race", "raid", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride"]);
   const arriving = (next, place) => {
     const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
     ctx.place = place;
     positionDebug.removeEventListener("click", copyPositionDebug);
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
-    for (const el of intros) el.hidden = el.dataset.intro !== next.id;
+    zoneLine = sceneSections.find((el) => el.dataset.scene === next.id && zoneLines.has(el)) || null;
+    zoneLineFor = "";
+    // Off the zipline the sides board is the arrival: no title card first.
+    for (const el of intros) el.hidden = el.dataset.intro !== next.id || place === "zipline" || place === BL.blockWire.WATCH_DECK_PLACE;
     // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
+    soundPanel.close();
     document.body.classList.toggle("arcade-game", arcadeScenes.has(next.id) || next.id === "hub" && place === "cloud-hopper");
     window.BL.net.setBody(null);
     window.BL.net.setBlend(null, 0);
@@ -326,6 +376,7 @@
   const arrived = (next, place, retainedTime) => {
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    gamepad.setContext(next.padContext || "foot");
     cabinetView.arrived(next);
     // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
     renderer.prepareScene(liveGeometry());
@@ -376,6 +427,8 @@
     const retained = liveGeometry(), keptScenes = KEEP_HUB ? ["hub", next.id, ...(next.keeps || [])] : [next.id, ...(next.keeps || [])];
     if (leaving.id !== "hub" || !KEEP_HUB) {
       models.release(leaving.id, keptScenes, retained);
+      // What it kept warm for its own doors goes with it, so a door readied and never walked through pins nothing.
+      for (const id of leaving.keeps || []) if (!keptScenes.includes(id)) { models.release(id, keptScenes, retained); window.BL.scenes[id]?.cachesReleased?.(); }
       if (DEBUG && leaving.id !== next.id && !keptScenes.includes(leaving.id)) models.assertReleased(leaving.id);
     }
     renderer.releaseUnused(retained);
@@ -436,12 +489,16 @@
     let left;
     try { left = leaving.leave(); }
     finally { visitController.abort(); }
+    // Where the Ooga stood belongs to the scene just left (visit-spot.js); the next one notes its own.
+    window.BL.visitSpot.clear();
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     if (!next.enterSteps) {
-      enter(next, place);
+      const t = transition;
+      try { enter(next, place); }
+      catch (error) { entryFailed(t, error); return false; }
       releaseLeft(leaving, next);
       return true;
     }
@@ -515,6 +572,7 @@
     const failed = transition.failed;
     transition.controller.abort();
     transition = null;
+    window.BL.outdoorScope.hold(false);
     if (active) holdInput(false);
     if (failed) cabinetView.failed();
     if (failed && active && active.stay) active.stay();
@@ -583,8 +641,8 @@
     const idx = QUALITY_ORDER.indexOf(renderer.quality);
     // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
     if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
-    // An unfocused tab and a transition building the next scene are not evidence that the tier is too expensive.
-    if (!document.hasFocus() || transition) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    // An unfocused tab, a transition building the next scene and a scene readying one are not evidence that the tier is too expensive.
+    if (!document.hasFocus() || transition || active?.warming) { perf.frames = perf.total = perf.bad = 0; perf.since = 0; return; }
     if (!perf.since) perf.since = now;
     perf.frames++;
     perf.total += intervalMs;
@@ -605,6 +663,7 @@
   // delays. Recalibrated 2026-09-24 against the hub as it now is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
   // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
+  let bootCPU = null;
   const tierFromBoot = (ms) => {
     if (renderer.kind !== "webgl2") return;
     const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM || MEMORY_LIMITED ? "medium" : null;
@@ -617,7 +676,7 @@
   const UNFOCUSED_INTERVAL = 1000 / 30;
   let lastRender = 0;
   let renderedFrames = 0;
-  let firstDraw = false;
+  let firstDraw = false, firstPlayable = false;
   // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
   // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
   // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
@@ -640,18 +699,22 @@
   // Shared by the display loop and the debug `advance`, so a stepped frame is exactly a displayed one.
   const step = (dt, now) => {
     gamepad.poll();
+    BL.destinationMap.update(now);
     elapsed += dt;
     if (transition) stepTransition(dt);
     // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
     if (transition && transition.building) { drawFade(); return; }
-    if (helpHeld) dt = 0;
+    // The panels hold the scene, unless a live session needs it to keep stepping.
+    const panelHolds = helpHeld && !active.runsBehindPanels;
+    if (panelHolds) dt = 0;
     if (!transition) holdInput(!!cabinetView.held);
     const sceneDt = cabinetView.held ? 0 : dt;
     sceneTime += sceneDt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
-    if (!helpHeld) active.update(sceneDt, sceneTime);
+    if (!panelHolds) active.update(sceneDt, sceneTime);
+    showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
@@ -660,6 +723,10 @@
     if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
+    if (drawn && !firstPlayable && !curtain.isConnected && !inputHeld && !transition) {
+      firstPlayable = true;
+      mark("first-playable");
+    }
     if (drawn && !firstDraw) {
       firstDraw = true;
       mark("drawn");
@@ -672,7 +739,7 @@
         }, WELCOME_MS);
       }
       if (params.get("signin") === "contributor-required") {
-        window.BL.hud.toast("Sign-in is for contributors with their own Ooga. Keep exploring signed out.");
+        window.BL.hud.openRecipe(true);
         params.delete("signin");
         const back = new URL(location.href); back.searchParams.delete("signin");
         history.replaceState(history.state, "", back.pathname + back.search + back.hash);
@@ -681,7 +748,7 @@
     if (!drawn && renderer.failure && !params.has("canvas2d")) {
       console.warn("WebGL2 programs failed, reloading with the Canvas 2D fallback", renderer.failure);
       params.set("canvas2d", "1");
-      location.replace(`${location.pathname}?${params}`);
+      location.replace(`${location.pathname}?${params}${location.hash}`);
       return;
     }
     active.input.update();
@@ -689,6 +756,8 @@
     cabinetView.afterDraw();
     if (fade > 0 || transition && transition.instant && !transition.ready) drawFade();
   };
+  const FRAME_ERRORS_MAX = 30;
+  let frameErrors = 0;
   const frame = (now) => {
     raf = window.requestAnimationFrame(frame);
     const interval = frameInterval();
@@ -704,7 +773,13 @@
     // Only a displayed frame carries a real interval; `advance` must not tier. A step resizes the canvas, which
     // clears it, so it comes before this frame's draw: after it, the browser presented one black frame.
     if (!interval) autoTier(delivered, now);
-    step(dt, now);
+    // A throw every frame stops the picture while the panels, chat and voice carry on: report it once, and after a
+    // moment offer the way out rather than leave the visitor with a frozen screen.
+    try { step(dt, now); frameErrors = 0; }
+    catch (error) {
+      if (++frameErrors === 1) reportError(error);
+      if (frameErrors === FRAME_ERRORS_MAX) window.BL.hud.offerReload("Ooga Booga Land hit a problem");
+    }
   };
 
   let rightShift = false;
@@ -745,12 +820,6 @@
         : active.previewDonation ? "Waiting for the local donation backend" : "Enter the mainland or Lightning Factory to preview a donation");
       return;
     }
-    if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
-      e.preventDefault();
-      game.clearLoot();
-      active.onLootCleared();
-      return;
-    }
     // Game scenes can expose a dedicated Agent. Hub companions are selected
     // directly; Right Shift+A never creates another gorilla there. Left Shift+A runs left.
     if ((active.agent || active.summonAgent) && e.shiftKey && rightShift
@@ -774,9 +843,14 @@
       sound.toggle();
       return;
     }
+    // L is the room's while one takes voice links (a demo tip is the scene's otherwise); H is the scene's first, for a
+    // forklift's horn, and the raised hand's when the scene had no use for it. Shift still counts, since it is the run key.
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    if (key === "l" && plain && net.linkEveryone()) { e.preventDefault(); return; }
     // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
     if (key === "b" && !DEBUG) return;
-    active.onKey(e);
+    const used = active.onKey(e);
+    if (key === "h" && plain && !used && window.BL.reactions.toggleHand()) e.preventDefault();
   };
   const onVisibility = () => {
     // A hidden tab holds no sockets; the chain's REST polls already skip themselves while hidden.
@@ -786,7 +860,9 @@
       window.cancelAnimationFrame(raf);
       raf = 0;
     } else if (!raf && (active || transition && transition.entering)) {
-      lastTime = performance.now();
+      // The time away is no frame interval: the first one back would close a tier window as slow on its own.
+      lastTime = lastRender = performance.now();
+      perf.frames = perf.total = perf.since = perf.bad = 0;
       raf = window.requestAnimationFrame(frame);
     }
   };
@@ -813,18 +889,34 @@
   });
   showBlockHeight(chain.snapshot);
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
+  if (params.has("nosim") || params.get("rate") === "0") window.BL.donationRate.stop();
   // Contributor activity belongs to the page, including while the hub is suspended or absent.
   const unsubscribeOogatron = window.BL.oogatronLive.subscribe((event) => {
     if (event.type === "stats") window.BL.contributors.applySnapshot(event.stats);
   });
   if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
-  if (!params.has("nosim") && params.get("totems") !== "0") window.BL.totemFeed.start();
+  // Merge Rock's merges: one request every few minutes for all its totems (repo-feed.js).
+  if (!params.has("nosim") && params.get("repos") !== "0") window.BL.repoFeed.start();
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
   // and three consecutive failures hand the session to Esplora on its own.
   if (!params.has("nosim") && params.get("chain") !== "0") chain.start({ source: params.get("chain") });
   // The account needs the Worker: without one /api/me finds nothing and the sheet shows no sign-in.
   const net = window.BL.net;
   const unsubscribeAccount = net.subscribe(window.BL.hud.showAccount);
+  // A new room connection or account reopens no earlier outdoor grant (outdoor-scope.js `reset`).
+  let scopeRoom = net.state.room, scopeMe = net.state.me?.id ?? 0;
+  const unsubscribeScope = net.subscribe((state) => {
+    const me = state.me?.id ?? 0;
+    if (state.room === scopeRoom && me === scopeMe) return;
+    scopeRoom = state.room;
+    scopeMe = me;
+    window.BL.outdoorScope.reset();
+  });
+  // Ooga Chat's outdoor voice bridge (outdoor-voice.js): the scope's transport, after the reset above so a reconnect's
+  // new epoch is the one it asks for. Without the room's feature it keeps the page out of every public audience.
+  const outdoorBridge = window.BL.outdoorVoice.attach();
+  // The voice switch prompt (voice-switch.js): asked once when the account already speaks from another device.
+  const voiceHandoff = window.BL.voiceSwitch.attach();
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
@@ -846,6 +938,8 @@
   accountReady.then(() => {
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
+    // A Worker's page whose look went unanswered knows nothing of its API: no made-up tips under the visitor's own name.
+    else if (net.state.started && !net.state.backend && document.documentElement.dataset.workerPage === "1") donations.config.simulate = false;
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
@@ -920,9 +1014,18 @@
   })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
-  const routed = router.current();
+  // The character studio (scene-studio.js) is a debug page too.
+  // The bare address goes back to the place the visitor last stood in this browser (visit-spot.js), as its own route
+  // would: a Timechain room by its number, any other scene as a whole. The island stands its Ooga at its own spot.
+  const resumeRoute = () => {
+    const was = DEBUG || params.has("scene") || WIP ? null : window.BL.visitSpot.resume();
+    if (!was || was.scene === "hub" || !Object.hasOwn(scenes, was.scene)) return null;
+    const list = window.BL.routes.list;
+    return list.find((e) => e.scene === was.scene && (e.place || "") === was.place) || list.find((e) => e.scene === was.scene && !e.place) || { scene: was.scene, place: null };
+  };
+  const routed = router.current() || resumeRoute();
   const requestedScene = (routed && routed.scene) || params.get("scene") || (WIP !== "1" ? WIP : null);
-  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : requestedScene === "lab" && !DEBUG ? null : requestedScene;
+  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : (requestedScene === "lab" || requestedScene === "studio") && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
@@ -1009,10 +1112,20 @@
         if (destroyed) { models.release(first.id, []); return; }
         bootFailed(error); return;
       }
-    } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    } else {
+      try { window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); }); }
+      catch (error) {
+        if (destroyed) { models.release(first.id, []); return; }
+        bootFailed(error); return;
+      }
+    }
+    mark("core-ready");
     mark("ready");
-    // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
-    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));
+    // A restored island counts as the build it replaced, and so does a build the scene left for after its first paint
+    // (`bootDeferred`), so neither starts a device a tier higher.
+    bootCPU = window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0);
+    bootCPU *= 1 + (active?.bootDeferred || 0);
+    tierFromBoot(bootCPU);
     raf = window.requestAnimationFrame(frame);
     if (terrainController && window.BL.terrainCache?.stats.lastSource === "miss") fillTerrain();
   };
@@ -1035,8 +1148,8 @@
       cabinet: cabinetView,
       renderer,
       startLevel: START_BANANAS,
+      get bootCPU() { return bootCPU; },
       hubPolicy: ctx.hubPolicy,
-      lootEnabled: LOOT_ENABLED,
       testBananas: TEST_BANANAS,
       project: renderer.project,
       housekeep,
@@ -1081,13 +1194,14 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "halloween" /* HALLOWEEN */]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "lab", "headquarters", "hud", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "repoIsland", "physics", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "studio", "raid", "halloween" /* HALLOWEEN */]) {
       Object.defineProperty(ooga, key, { get: () => active && active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
   }
   const destroy = () => {
     cabinetView.dispose();
+    BL.destinationMap.dispose();
     controlsHelp.dispose();
     destroyed = true;
     bootBuildController.abort();
@@ -1109,8 +1223,10 @@
     chain.dispose();
     unsubscribeOogatron();
     window.BL.oogatronLive.dispose();
-    window.BL.totemFeed.dispose();
     unsubscribeAccount();
+    unsubscribeScope();
+    outdoorBridge.dispose();
+    voiceHandoff.dispose();
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
@@ -1118,8 +1234,10 @@
     window.BL.voice.dispose();
     window.BL.highscores.dispose();
     net.dispose();
-    offSound(); soundButton.removeEventListener("click", sound.toggle);
+    offSound(); soundPanel.dispose();
     window.removeEventListener("keydown", onVoiceMuteKey, true);
+    offPad();
+    padSettings.dispose();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);

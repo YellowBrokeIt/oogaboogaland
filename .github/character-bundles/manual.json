@@ -1,16 +1,16 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-11-03",
-  "round": "0f3b6ca1e43d3354d8cf7fea18a72a77d4af9e2d",
+  "openedOn": "2026-11-15",
+  "round": "3409dcde68b63aa285538220d6b34cd4f2240d66",
   "entries": [
     {
-      "pr": 439,
-      "head": "2f11bddb8c93ca8c1b62aae95368aaaafa965cfc",
-      "author": "Bitcoin-Bill",
+      "pr": 707,
+      "head": "d3d343eb1c7cd8ea91c461e50f8d9a7bff1c0a39",
+      "author": "Bitclank-Bill",
       "path": "src/characters/Bitcoin-Bill.js",
-      "base": "ae1893ff00fcb4d2d3a53df8ec0b5e43939150b9",
-      "hash": "fb6daa270d4fe7a1652a72166d648d3b1962c057ddfadf78803d1f1249d9fd3a",
+      "base": "4cac1fdfeebf1c1c1e8af33d4662d36f57d1a971",
+      "hash": "4d3795557c5a66b95e54769aa0c866454d42c3bab015ac28d8d693a969b45769",
       "lane": "manual"
     }
   ]
