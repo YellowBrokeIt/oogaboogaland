@@ -237,7 +237,7 @@
       lamps.push(lamp);S.addChild(exterior,lamp);structures.push(lamp);
     }
     sampleDaylight();
-    camera=S.createCamera({fov:55,near:.1,far:750});overlayCanvas=ctx.overlay;
+    camera=S.createCamera({fov:55,near:.1,far:750});overlayCanvas=ctx.overlay;atmosphere.setCamera(camera);
     const asked=new URLSearchParams(location.search).get("character");
     const own=BL.net.ownCharacter(),carried=world.pilot||asked;
     const allowed=c=>!BL.net.mayDrive(c.name);
@@ -335,6 +335,7 @@
     nature=BL.dsbNature.create({root:exterior,land,renderer:ctx.renderer,camera,weather});
     detail=BL.dsbExterior.create({root:exterior,land,nature});
     enrichment=BL.dsbEnrichment.create({root:exterior,land,nature,detail,renderer:ctx.renderer,camera});
+    atmosphere.dress(enrichment);
     town=BL.dsbTown.create({root:exterior,land,nature,detail,enrichment});
     olympus=BL.dsbOlympus.create({root:exterior,land,nature,detail,enrichment,renderer:ctx.renderer});
     vacancies=BL.dsbVacancies.create({root:exterior,land,olympus});
