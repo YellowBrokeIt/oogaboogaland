@@ -215,7 +215,27 @@ vec3 dsbWaterShade(out vec3 bright) {
   float shoreWave=.5+.5*sin(depth*7.0-uWindTime*1.7+vnoise(p*.6)*1.5);
   float foam=bed.g*smoothstep(.06,.22,depth)*(1.0-smoothstep(.4,1.15,depth))*smoothstep(.88,.99,shoreWave)*.16*uDSBEnvironment.w;
   vec3 col=mix(body,reflection,fres)+uSun*glint*1.5+vec3(foam*lightLevel);
-  bright=uSun*glint*.65;
+  // Only the eight prioritized DSB nightlife lights (tagged .a=.25) get a soft
+  // rippling shoreline reflection. Existing depth/FFT textures are unchanged.
+  // No geometric mirror, new render target or light pass: 8 bounded samples.
+  vec3 neonReflection=vec3(0.0);
+  for(int i=4;i<12;i++){
+    if(i>=uLightCount)break;
+    vec4 source=uLights[i*2],color=uLights[i*2+1];
+    if(color.a<.20||color.a>.50)continue;
+    vec2 delta=p-source.xz;
+    float sq=dot(delta,delta);
+    if(sq>400.0)continue;
+    vec2 toward=normalize(uEye.xz-source.xz+vec2(.001));
+    float across=dot(delta,vec2(-toward.y,toward.x));
+    float along=dot(delta,toward);
+    float stripe=exp(-across*across/7.0)*exp(-abs(along)/11.0);
+    float ripples=pow(.5+.5*sin(dot(delta,vec2(7.7,4.9))+uWindTime*2.3),2.0);
+    float falloff=1.0-smoothstep(10.0,20.0,sqrt(sq));
+    neonReflection+=color.rgb*(.10+.09*ripples)*stripe*falloff;
+  }
+  col+=neonReflection;
+  bright=uSun*glint*.65+neonReflection*.45;
   return col;
 }
 `;
