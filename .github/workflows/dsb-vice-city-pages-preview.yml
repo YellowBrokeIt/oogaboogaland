@@ -25,8 +25,8 @@ jobs:
           npm run build
           mkdir -p untracked/dsb-night-playable/src/js
           cp oogaboogaland.html untracked/dsb-night-playable/index.html
-          cp -R src/maxis-player untracked/dsb-night-playable/src/maxis-player
-          cp src/js/maxis-media-data.js untracked/dsb-night-playable/src/js/maxis-media-data.js
+          if test -d src/maxis-player; then cp -R src/maxis-player untracked/dsb-night-playable/src/maxis-player; fi
+          if test -f src/js/maxis-media-data.js; then cp src/js/maxis-media-data.js untracked/dsb-night-playable/src/js/maxis-media-data.js; fi
           test -s untracked/dsb-night-playable/index.html
       - uses: actions/upload-artifact@v4
         with:
