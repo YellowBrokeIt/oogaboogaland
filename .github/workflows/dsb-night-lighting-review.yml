@@ -4,6 +4,8 @@ on:
   push:
     branches: [feature/dsb-vice-city-night-lighting]
   workflow_dispatch:
+  pull_request:
+    branches: [rock]
 
 permissions:
   contents: read
