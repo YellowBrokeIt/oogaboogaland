@@ -68,8 +68,8 @@
         band(facade,tone,-b.w/2+.33,3.2,front+.30,.08,.72,.08);
         band(facade,tone,b.w/2-.33,3.2,front+.30,.08,.72,.08);
       }
-      accent(x,y+.06,z,tone,harbor?12:15,harbor?7.0:9.2);
-      if(!harbor)accent(x+2*c,y-.7,z-2*s,tone,10.5,4.7);
+      accent(x,y+.06,z,tone,harbor?11:12.5,harbor?3.6:4.5);
+      if(!harbor)accent(x+2*c,y-.7,z-2*s,tone,8.5,2.1);
     }
     if(renderer.kind!=="canvas2d"){
       // The main island's own sea stacks, hazed by the existing fog, and its rafts under sail.
@@ -91,7 +91,7 @@
           // The tubes follow the authored canopy, not an invented beach building.
           band(group,tone,p.x,p.y+2.77,p.z+1.48,3.8,.10,.09);
           for(const side of [-1,1])band(group,tone,p.x+side*1.9,p.y+2.77,p.z,.08,.10,2.6);
-          accent(p.x,p.y+2.50,p.z+1.45,tone,15,8.0);
+          accent(p.x,p.y+2.50,p.z+1.45,tone,12,4.1);
           beach++;
         }
         if(p.region==="beach"&&p.kind==="parasol"&&parasol<4){
@@ -99,24 +99,24 @@
           const tone=parasol%3===0?"pink":parasol%3===1?"cyan":"violet";
           const y=land.heightAt(p.x,p.z)+.12;
           band(group,tone,p.x+.6,y,p.z+.5,.32,.08,.12);
-          accent(p.x+.6,y+.5,p.z+.5,tone,10,5.4);
+          accent(p.x+.6,y+.5,p.z+.5,tone,8.5,2.5);
           parasol++;
         }
         if(p.region==="pier"&&p.kind==="glass"&&pier++%4===0&&harbor<4){
           const tone=harbor%3===0?"cyan":harbor%3===1?"pink":"violet";
           band(group,tone,p.x,p.y+.20,p.z,.22,.17,.20);
-          accent(p.x,p.y+.25,p.z,tone,13,7.0);
+          accent(p.x,p.y+.25,p.z,tone,10,3.0);
           harbor++;
         }
         if(p.region==="quay"&&p.kind==="glass"&&quay<2){
           const tone=quay===0?"pink":"cyan";
           band(group,tone,p.x,p.y+.20,p.z,.22,.12,.16);
-          accent(p.x,p.y+.2,p.z,tone,12,6.0);
+          accent(p.x,p.y+.2,p.z,tone,10,3.0);
           quay++;
         }
       }
       // A missed pergola never creates new terrain or an ungrounded lamp.
-      if(!beach)accent(27,land.heightAt(27,67)+2.6,67,"cyan",12,5.5);
+      if(!beach)accent(27,land.heightAt(27,67)+2.6,67,"cyan",11,3.0);
     };
     const setCamera=value=>{camera=value;focusX=Infinity;};
     const refresh=()=>{
