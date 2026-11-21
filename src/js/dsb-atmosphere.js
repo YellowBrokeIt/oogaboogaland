@@ -40,9 +40,9 @@
     const group=S.createNode({sightHidden:true});S.addChild(root,group);
     // The selected nightlife facades are colored, but the town's ordinary doors remain amber.
     // Geometry is shared, has no collision, and is dark during the day.
-    const VENUES={"Meme Factory House":"pink","DSB Studio Stage":"cyan","Maxis Club Theater":"violet","Without Rulers Shop":"cyan","Big Bitcoin":"pink","Stackchain Magazine":"violet","Proof Of Ink":"pink"};
-    const TONES={pink:[.92,.31,.57],cyan:[.24,.77,.86],violet:[.60,.41,.86]};
-    const GEOS={pink:M.box({color:"#f063a8",emissive:.9}),cyan:M.box({color:"#65cfe2",emissive:.9}),violet:M.box({color:"#a68be9",emissive:.9})};
+    const VENUES={"Meme Factory House":"pink","DSB Studio Stage":"cyan","Maxis Club Theater":"violet","Without Rulers Shop":"cyan","Big Bitcoin":"pink","Stackchain Magazine":"violet","Proof Of Ink":"pink","Harbor store":"cyan","Harbor office":"violet"};
+    const TONES={pink:[1,.20,.58],cyan:[.12,.83,1],violet:[.67,.35,1]};
+    const GEOS={pink:M.box({color:"#ff4ba5",emissive:1}),cyan:M.box({color:"#31ddff",emissive:1}),violet:M.box({color:"#ad80fb",emissive:1})};
     const doors=[],warm=[],accents=[],glows=[];
     let camera=null,dressed=false,sails=null,focusX=Infinity,focusZ=Infinity;
     const near=(a,b)=>a.dist-b.dist;
@@ -57,11 +57,19 @@
       const tone=VENUES[b.name];if(!tone)continue;
       const facade=S.createNode({position:{x:b.x,y:b.floor,z:b.z},rotation:{x:0,y:b.yaw,z:0},sightHidden:true});
       S.addChild(group,facade);
-      // A thin fascia near the roof, not an illuminated outline around the whole white house.
-      band(facade,tone,0,(b.h||4.5)-.42,b.d/2+.23,Math.min(b.w-.8,4.6),.065,.075);
-      if(b.name==="Meme Factory House"||b.name==="DSB Studio Stage")
-        band(facade,tone,-b.w/2+.34,2.45,b.d/2+.24,.065,.74,.07);
-      accent(x,y+.2,z,tone,8.5,.48);
+      // Thin roof and venue-entry tubes, while the rest of the plaster stays white.
+      const front=b.d/2,roof=b.h||4.5,harbor=b.name.startsWith("Harbor");
+      band(facade,tone,0,roof-.42,front+.27,Math.min(b.w-.7,5.1),.11,.10);
+      if(!harbor){
+        for(const side of [-1,1])band(facade,tone,side*(b.w/2-.30),2.02,front+.29,.085,1.35,.08);
+        band(facade,tone,0,2.70,front+.51,Math.min(2.2,b.w-1),.07,.10);
+      }
+      if(b.name==="Meme Factory House"||b.name==="DSB Studio Stage"){
+        band(facade,tone,-b.w/2+.33,3.2,front+.30,.08,.72,.08);
+        band(facade,tone,b.w/2-.33,3.2,front+.30,.08,.72,.08);
+      }
+      accent(x,y+.06,z,tone,harbor?12:15,harbor?7.0:9.2);
+      if(!harbor)accent(x+2*c,y-.7,z-2*s,tone,10.5,4.7);
     }
     if(renderer.kind!=="canvas2d"){
       // The main island's own sea stacks, hazed by the existing fog, and its rafts under sail.
@@ -76,23 +84,39 @@
     // No new building, planting, collider, pier, or swimming access is introduced.
     const dress=enrichment=>{
       if(dressed)return;dressed=true;
-      let beach=0,pier=0,harbor=0;
+      let beach=0,parasol=0,pier=0,harbor=0,quay=0;
       for(const p of enrichment.placements){
         if(p.region==="beach"&&p.kind==="pergolaroof"&&beach<2){
           const tone=beach===0?"cyan":"pink";
-          band(group,tone,p.x,p.y+2.75,p.z+1.4,3.3,.06,.07);
-          accent(p.x-1.3,p.y+2.4,p.z+1.4,tone,10,.34);
+          // The tubes follow the authored canopy, not an invented beach building.
+          band(group,tone,p.x,p.y+2.77,p.z+1.48,3.8,.10,.09);
+          for(const side of [-1,1])band(group,tone,p.x+side*1.9,p.y+2.77,p.z,.08,.10,2.6);
+          accent(p.x,p.y+2.50,p.z+1.45,tone,15,8.0);
           beach++;
         }
-        if(p.region==="pier"&&p.kind==="glass"&&pier++%5===0&&harbor<3){
-          const tone=harbor===1?"cyan":"violet";
-          band(group,tone,p.x,p.y+.19,p.z,.15,.12,.15);
-          accent(p.x,p.y+.2,p.z,tone,7,.25);
+        if(p.region==="beach"&&p.kind==="parasol"&&parasol<4){
+          // Tiny non-colliding footlights beside existing loungers and parasols.
+          const tone=parasol%3===0?"pink":parasol%3===1?"cyan":"violet";
+          const y=land.heightAt(p.x,p.z)+.12;
+          band(group,tone,p.x+.6,y,p.z+.5,.32,.08,.12);
+          accent(p.x+.6,y+.5,p.z+.5,tone,10,5.4);
+          parasol++;
+        }
+        if(p.region==="pier"&&p.kind==="glass"&&pier++%4===0&&harbor<4){
+          const tone=harbor%3===0?"cyan":harbor%3===1?"pink":"violet";
+          band(group,tone,p.x,p.y+.20,p.z,.22,.17,.20);
+          accent(p.x,p.y+.25,p.z,tone,13,7.0);
           harbor++;
         }
+        if(p.region==="quay"&&p.kind==="glass"&&quay<2){
+          const tone=quay===0?"pink":"cyan";
+          band(group,tone,p.x,p.y+.20,p.z,.22,.12,.16);
+          accent(p.x,p.y+.2,p.z,tone,12,6.0);
+          quay++;
+        }
       }
-      // The beach may have no pergola if every footprint fails terrain clearance.
-      if(!beach)accent(27,land.heightAt(27,67)+2.6,67,"cyan",10,.28);
+      // A missed pergola never creates new terrain or an ungrounded lamp.
+      if(!beach)accent(27,land.heightAt(27,67)+2.6,67,"cyan",12,5.5);
     };
     const setCamera=value=>{camera=value;focusX=Infinity;};
     const refresh=()=>{
@@ -109,16 +133,16 @@
       const k=o.lampFactor,a=o.lights;let count=o.lightCount;
       const sun=Number.isFinite(o.sunAltitude)?o.sunAltitude:-12;
       const neon=k*Math.max(0,Math.min(1,(7-sun)/10));
-      for(const n of glows)n.glow=neon*.72;
+      for(const n of glows){n.glow=neon*.98;n.visible=neon>.025;}
       if(k<=.001){o.lightCount=count;return;}
       refresh();
       const tier=renderer.kind==="canvas2d"?"low":renderer.quality;
       const max=Math.min(BL.glRenderer.POINT_LIGHT_CAPACITY,tier==="low"?10:tier==="medium"?20:32);
-      const colored=Math.min(accents.length,tier==="low"?2:tier==="medium"?4:7,Math.max(0,max-count));
+      const colored=Math.min(accents.length,tier==="low"?2:tier==="medium"?5:8,Math.max(0,max-count));
       for(let i=0;i<colored;i++){
         const v=accents[i],p=count++*8,b=neon*v.power;
         a[p]=v.x;a[p+1]=v.y;a[p+2]=v.z;a[p+3]=v.range;
-        a[p+4]=b*v.tone[0];a[p+5]=b*v.tone[1];a[p+6]=b*v.tone[2];a[p+7]=0;
+        a[p+4]=b*v.tone[0];a[p+5]=b*v.tone[1];a[p+6]=b*v.tone[2];a[p+7]=.25; // marked for bounded sea glints
       }
       for(const v of warm){
         if(count>=max)break;
