@@ -1,4 +1,4 @@
-name: Deploy DSB Night Lighting Preview
+name: Build Downloadable DSB Night Preview
 
 on:
   push:
@@ -7,73 +7,29 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  deploy:
-    if: github.repository == 'YellowBrokeIt/oogaboogaland'
+  package:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 15
     steps:
-      - name: Check out synchronized rock for the existing Pages root
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          ref: rock
-          path: live-src
           persist-credentials: false
-      - name: Check out protected original DSB preview
-        uses: actions/checkout@v6
-        with:
-          ref: feature/dsb-land-master
-          path: original-dsb
-          persist-credentials: false
-      - name: Check out new night lighting review branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-          path: lighting-src
-          persist-credentials: false
-      - name: Set up Node 22
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           package-manager-cache: false
-      - uses: actions/configure-pages@v5
-      - name: Preserve existing Pages root and direct routes
-        run: node live-src/scripts/site.mjs "$GITHUB_WORKSPACE/_site"
-      - name: Preserve the original DSB preview
+      - name: Build portable one-page DSB game
         run: |
-          cd original-dsb
           npm run build
-          mkdir -p ../_site/dsb-preview/src/js
-          cp oogaboogaland.html ../_site/dsb-preview/index.html
-          cp -R src/maxis-player ../_site/dsb-preview/src/maxis-player
-          cp src/js/maxis-media-data.js ../_site/dsb-preview/src/js/maxis-media-data.js
-      - name: Build separate Vice City lighting preview
-        run: |
-          cd lighting-src
-          npm run build
-          mkdir -p ../_site/dsb-night-preview/src/js
-          cp oogaboogaland.html ../_site/dsb-night-preview/index.html
-          cp -R src/maxis-player ../_site/dsb-night-preview/src/maxis-player
-          cp src/js/maxis-media-data.js ../_site/dsb-night-preview/src/js/maxis-media-data.js
-      - name: Validate preview isolation
-        run: |
-          test -s _site/dsb-preview/index.html
-          test -s _site/dsb-night-preview/index.html
-          test -s _site/index.html
-          sha256sum _site/dsb-preview/index.html _site/dsb-night-preview/index.html
-      - uses: actions/upload-pages-artifact@v4
+          mkdir -p untracked/dsb-night-playable/src/js
+          cp oogaboogaland.html untracked/dsb-night-playable/index.html
+          cp -R src/maxis-player untracked/dsb-night-playable/src/maxis-player
+          cp src/js/maxis-media-data.js untracked/dsb-night-playable/src/js/maxis-media-data.js
+          test -s untracked/dsb-night-playable/index.html
+      - uses: actions/upload-artifact@v4
         with:
-          path: _site
-      - name: Deploy both old and new DSB previews
-        id: deployment
-        uses: actions/deploy-pages@v4
+          name: dsb-vice-city-night-playable
+          path: untracked/dsb-night-playable/
+          if-no-files-found: error
