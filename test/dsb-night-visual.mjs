@@ -9,22 +9,36 @@ const folder=resolve("untracked/dsb-night-lighting-review");
 mkdirSync(folder,{recursive:true});
 const source=pathToFileURL(resolve("oogaboogaland.html")).href;
 const views=["coastal-chora","coastal-beach","coastal-harbor"];
+// Close views frame the existing venues, beach canopies and harbor lights more honestly.
+const closeups={
+  "chora-close":{yaw:.38,pitch:.32,dist:19,target:{x:27,y:5,z:50}},
+  "beach-close":{yaw:.26,pitch:.32,dist:24,target:{x:24,y:2,z:67}},
+  "harbor-close":{yaw:.54,pitch:.36,dist:26,target:{x:-41,y:2,z:45}}
+};
 const url=hour=>source+"?scene=dsb&debug=1&hour="+hour+"&view=coastal-chora&nosim=1";
 const ready=async(browser,label)=>{
   let state=null;
   for(let i=0;i<80;i++){
     state=await browser.evaluate('(() => ({dsb:!!window.__ooga?.dsb?.land,atm:!!window.__ooga?.dsb?.atmosphere,pilot:!!window.__ooga?.pilot,graphics:window.__ooga?.renderer?.kind||null,page:document.readyState}))()').catch(error=>({error:String(error)}));
-    if(state?.dsb&&state?.atm&&state?.pilot)return state;
+    if(state?.dsb&&state?.atm&&state?.pilot){
+      assert.notEqual(state.graphics,"canvas2d",label+" fell back to Canvas2D; cannot validate sea shader");
+      return state;
+    }
     await browser.sleep(750);
   }
   throw Error(label+" never reached DSB: "+JSON.stringify(state)+" logs="+browser.logs.slice(-8).join(" | "));
 };
 const cleanHUD=browser=>browser.evaluate('(() => {for(const id of ["sheet","position-debug"])document.getElementById(id)?.style.setProperty("display","none","important");})()');
 const picture=async(browser,label,view,hour)=>{
-  const state=await browser.evaluate('(() => {const d=window.__ooga.dsb,atm=d.atmosphere;const go=window.__ooga.pilot.goPreset('+JSON.stringify(view)+');return {view:'+JSON.stringify(view)+',go:go===false?false:true,accentCount:atm.nightlifeAccents,doorCount:atm.doors,lightCount:window.__ooga.renderOpts?.lightCount,lampFactor:window.__ooga.renderOpts?.lampFactor,sunAltitude:window.__ooga.renderOpts?.sunAltitude,canvas:!!document.getElementById("scene")};})()');
+  const action=closeups[view]?'window.__ooga.pilot.look('+JSON.stringify(closeups[view])+')':'window.__ooga.pilot.goPreset('+JSON.stringify(view)+')';
+  const state=await browser.evaluate('(() => {const d=window.__ooga.dsb,atm=d.atmosphere;const go=('+action+');const opts=window.__ooga.renderOpts,lights=opts?.lights||[];let colored=0;for(let i=0;i<(opts?.lightCount||0);i++)if(lights[i*8+7]>.2&&lights[i*8+7]<.5)colored++;return {view:'+JSON.stringify(view)+',go:go===false?false:true,accentCount:atm.nightlifeAccents,doorCount:atm.doors,lightCount:opts?.lightCount,colored,lampFactor:opts?.lampFactor,sunAltitude:opts?.sunAltitude,canvas:!!document.getElementById("scene")};})()');
   assert.ok(state.go!==false,label+" "+view+" failed camera preset");
   assert.ok(state.accentCount>=7,label+" "+view+" missing accents: "+JSON.stringify(state));
   assert.ok(state.canvas,label+" missing scene canvas");
+  if(hour>=19){
+    assert.ok(state.colored>=2,label+" "+view+" missing colored night point lights");
+    assert.ok(state.lightCount<=32,label+" exceeded engine light budget");
+  }else assert.equal(state.colored,0,label+" daylight neon should be off");
   await browser.sleep(1250);
   const path=resolve(folder,label+"-"+view+"-"+hour+".png");
   await browser.screenshot(path);
@@ -44,7 +58,7 @@ async function session(label,w,h,mobile,hour,which){
   }finally{await browser.close(true);}
 }
 try{
-  await session("desktop-night",1280,720,false,22,views);
+  await session("desktop-night",1280,720,false,22,[...views,"chora-close","beach-close","harbor-close"]);
   await session("mobile-night",390,844,true,22,views);
   await session("desktop-day",1280,720,false,13,["coastal-chora"]);
   console.log("Nightlighting visual capture complete.");
