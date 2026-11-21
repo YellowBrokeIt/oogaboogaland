@@ -1,0 +1,46 @@
+name: DSB Night v2 Screenshots (Temporary)
+
+on:
+  push:
+    branches: [feature/dsb-vice-city-night-lighting]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsb-night-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out V2 lighting revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Syntax and build
+        run: |
+          node --check src/js/dsb-atmosphere.js
+          node --check src/js/dsb-water.js
+          node --check test/dsb-night-visual.mjs
+          npm run build
+      - name: Real desktop and mobile WebGL night captures
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          CHROME="$CHROME" node test/dsb-night-visual.mjs
+      - name: Upload original screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsb-vice-city-v2-screenshots
+          path: untracked/dsb-night-lighting-review/*.png
+          if-no-files-found: ignore
