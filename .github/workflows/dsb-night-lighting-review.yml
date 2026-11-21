@@ -1,0 +1,44 @@
+name: DSB Night Lighting Visual Review
+
+on:
+  push:
+    branches: [feature/dsb-vice-city-night-lighting]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsb-night-lighting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visuals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the lighting branch
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Confirm reviewer syntax
+        run: node --check test/dsb-night-visual.mjs
+      - name: Build portable game
+        run: npm run build
+      - name: Capture actual DSB nighttime desktop and mobile scenes
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          CHROME="$CHROME" node test/dsb-night-visual.mjs
+      - name: Upload real game screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsb-vice-city-night-review
+          path: untracked/dsb-night-lighting-review/*.png
+          if-no-files-found: ignore
