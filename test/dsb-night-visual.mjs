@@ -34,7 +34,7 @@ const picture=async(browser,label,view,hour)=>{
   console.log("DSB NIGHT REVIEW "+JSON.stringify({label,hour,...state,bytes:bytes.length,path}));
 };
 async function session(label,w,h,mobile,hour,which){
-  const browser=await launch({w,h,mobile});
+  const browser=await launch({w,h,mobile,startupMs:60000});
   try{
     await browser.open(url(hour));await ready(browser,label);
     await cleanHUD(browser);
