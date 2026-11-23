@@ -43796,7 +43796,9 @@ const raceRigChecks = async () => {
     // (to edd7c63c); both uniforms are 0 for every other geometry.
     // Observatory quality fades add uCanvasPrevious and uCanvasBlend (to a5600e80).
     // uCanvasBlend stays 0 outside a transitioning camera feed; ordinary output is unchanged.
-    "a5600e80e22eaa8b0c5f7bd50a087bf2165bc07401f73f41abea2cdf1aa59496",
+    // DSB night v2 adds opt-in colored-water glints to DSB water faces only.
+    // Intentional fragment rebaseline; the pinned vertex and shadow byte hashes stay unchanged.
+    "ea39194f927f6809ad5ebcc288fca2a8bd414136c2c7ef49b7bccd6b7e08e3a1",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));

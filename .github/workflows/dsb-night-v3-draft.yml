@@ -1,0 +1,96 @@
+name: DSB Night v3 Draft Validation
+
+on:
+  push:
+    branches: [feature/dsb-vice-city-night-lighting]
+  pull_request:
+    branches: [rock]
+    types: [synchronize]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dsb-night-v3-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: github.repository == 'YellowBrokeIt/oogaboogaland' && (github.event_name != 'pull_request' || (github.event.pull_request.number == 10 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/dsb-vice-city-night-lighting'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out draft validation revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: true
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Apply approved v3 lighting edits to the pinned files
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = "726f08d3dcb3476a472ad0e3bd01dd084d4c7e5f"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/dsb-night-v3-draft.yml"
+          git rev-parse HEAD > "$RUNNER_TEMP/dsb-v3-start"
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync} from "node:fs";
+          const edits={"src/js/dsb-atmosphere.js":[["    const TONES=","    // Low-key trim on selected ordinary Chora houses, rather than turning every facade into a venue.\n    const ALLEYS={\"VACANT 1\":\"violet\",\"VACANT 2\":\"pink\",\"VACANT 3\":\"cyan\",\"VACANT 5\":\"violet\",\"VACANT 11\":\"pink\",\"VACANT 20\":\"pink\",\"VACANT 21\":\"cyan\"};\n    const TONES="],["const accent=(x,y,z,tone,range,power)=>accents.push({x,y,z,tone:TONES[tone],range,power,dist:0});","const accent=(x,y,z,tone,range,power,penalty=0)=>accents.push({x,y,z,tone:TONES[tone],range,power,penalty,dist:0});"],["const tone=VENUES[b.name];if(!tone)continue;","const venue=VENUES[b.name],tone=venue||ALLEYS[b.name];if(!tone)continue;"],["      band(facade,tone,0,roof-.42,front+.27,Math.min(b.w-.7,5.1),.11,.10);","      if(!venue){\n        // A modest lintel and corner tube carry color along existing residential lanes.\n        band(facade,tone,0,roof-.40,front+.24,Math.min(b.w-1,2.5),.085,.09);\n        band(facade,tone,b.w/2-.25,2.4,front+.25,.075,.9,.075);\n        accent(x,y-.4,z,tone,9.5,2.3);\n        continue;\n      }\n      band(facade,tone,0,roof-.42,front+.27,Math.min(b.w-.7,5.1),.11,.10);"],["        band(facade,tone,0,2.70,front+.51,Math.min(2.2,b.w-1),.07,.10);","        band(facade,tone,0,2.70,front+.51,Math.min(2.2,b.w-1),.07,.10);\n        // Continue the front roof trim around the corners into the side streets.\n        for(const side of [-1,1])band(facade,tone,side*(b.w/2+.22),roof-.42,front-Math.min(1.2,b.d*.22),.095,.10,Math.min(2.4,b.d*.45));"],["if(!harbor)accent(x+2*c,y-.7,z-2*s,tone,8.5,2.1);","if(!harbor)accent(x+2*c,y-.7,z-2*s,tone,10,2.5,36);"],["          for(const side of [-1,1])band(group,tone,p.x+side*1.9,p.y+2.77,p.z,.08,.10,2.6);\n          accent(p.x,p.y+2.50,p.z+1.45,tone,12,4.1);","          band(group,tone,p.x,p.y+2.77,p.z-1.48,3.8,.10,.09);\n          for(const side of [-1,1]){\n            band(group,tone,p.x+side*1.9,p.y+2.77,p.z,.08,.10,2.6);\n            band(group,tone,p.x+side*1.90,p.y+1.95,p.z+1.48,.08,.55,.08);\n          }\n          accent(p.x,p.y+2.50,p.z+1.45,tone,14,5.1);"],["p.kind===\"parasol\"&&parasol<4","p.kind===\"parasol\"&&parasol<5"],["          band(group,tone,p.x+.6,y,p.z+.5,.32,.08,.12);\n          accent(p.x+.6,y+.5,p.z+.5,tone,8.5,2.5);","          band(group,tone,p.x+.6,y,p.z+.5,.48,.09,.14);\n          const y2=land.heightAt(p.x-.6,p.z+.5)+.12;\n          band(group,tone,p.x-.6,y2,p.z+.5,.48,.09,.14);\n          accent(p.x+.6,y+.7,p.z+.5,tone,10.5,3.4);"],["for(const a of accents)a.dist=(a.x-x)*(a.x-x)+(a.z-z)*(a.z-z);","for(const a of accents)a.dist=(a.x-x)*(a.x-x)+(a.z-z)*(a.z-z)+a.penalty;"],["const colored=Math.min(accents.length,tier===\"low\"?2:tier===\"medium\"?5:8,Math.max(0,max-count));","const colored=neon>.001?Math.min(accents.length,tier===\"low\"?2:tier===\"medium\"?5:8,Math.max(0,max-count)):0;"]],"src/js/dsb-water.js":[["  // Only the eight prioritized DSB nightlife lights (tagged .a=.25) get a soft\n  // rippling shoreline reflection. Existing depth/FFT textures are unchanged.","  // Eight bounded nightlife samples, with irregular glints driven by the existing FFT surface.\n  // Break the streaks across wave crests, not into evenly spaced bright bars."],["  vec3 neonReflection=vec3(0.0);","  vec3 neonReflection=vec3(0.0);\n  vec2 waveWarp=slope*2.8;\n  float waveGrain=vnoise(p*vec2(.85,2.4)+vec2(uWindTime*.17,-uWindTime*.29));\n  float crestGrain=vnoise(p*vec2(2.6,5.1)+vec2(-uWindTime*.34,uWindTime*.21));"],["    float stripe=exp(-across*across/7.0)*exp(-abs(along)/11.0);\n    float ripples=pow(.5+.5*sin(dot(delta,vec2(7.7,4.9))+uWindTime*2.3),2.0);\n    float falloff=1.0-smoothstep(10.0,20.0,sqrt(sq));\n    neonReflection+=color.rgb*(.10+.09*ripples)*stripe*falloff;","    // The streak widens and breaks up with distance, bending with the surface normal.\n    float spread=1.15+.10*max(along,0.0);\n    float warpedAcross=across+dot(waveWarp,vec2(-toward.y,toward.x))+(waveGrain-.5)*1.1;\n    float stripe=exp(-warpedAcross*warpedAcross/(spread*spread))*exp(-abs(along)/10.0);\n    float forward=.28+.72*smoothstep(-3.0,3.0,along);\n    float ripples=.5+.5*sin(along*7.0+across*2.1+uWindTime*2.1+waveGrain*8.0);\n    float shards=smoothstep(.35,.81,ripples*.55+crestGrain*.45);\n    float falloff=1.0-smoothstep(8.0,20.0,sqrt(sq));\n    neonReflection+=color.rgb*(.035+.20*shards)*stripe*forward*falloff;"],["bright=uSun*glint*.65+neonReflection*.45;","bright=uSun*glint*.65+neonReflection*.32;"]],"test/run.mjs":[["    \"ea39194f927f6809ad5ebcc288fca2a8bd414136c2c7ef49b7bccd6b7e08e3a1\",","    // DSB night v3: FFT-warped, broken shoreline glints; same strict byte assertion.\n    \"7d0bbd4b029682cbfbaf6d905beb0e7645d7dd2e65117c35d2d2e923df61e57f\","]]};
+          for(const [path,replacements] of Object.entries(edits)){
+            let source=readFileSync(path,"utf8");
+            for(const [before,after] of replacements){
+              if(source.split(before).length!==2)throw Error("Unexpected source: "+path+" "+before);
+              source=source.replace(before,after);
+            }
+            writeFileSync(path,source);
+          }
+          NODE
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "src/js/dsb-atmosphere.js src/js/dsb-water.js test/run.mjs "
+          node --check src/js/dsb-atmosphere.js
+          node --check src/js/dsb-water.js
+      - name: Run strict regression tests
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+      - name: Capture real desktop and mobile WebGL night views and daylight comparison
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          test -x "$CHROME"
+          CHROME="$CHROME" node test/dsb-night-visual.mjs
+      - name: Package validated offline review
+        run: |
+          mkdir -p untracked/dsb-night-v3-playable
+          cp oogaboogaland.html untracked/dsb-night-v3-playable/index.html
+          mkdir -p untracked/dsb-night-v3-playable/src/js
+          cp -R src/maxis-player untracked/dsb-night-v3-playable/src/maxis-player
+          cp src/js/maxis-media-data.js untracked/dsb-night-v3-playable/src/js/maxis-media-data.js
+          test -s untracked/dsb-night-v3-playable/index.html
+      - name: Upload real screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsb-vice-city-v3-screenshots
+          path: untracked/dsb-night-lighting-review/*.png
+          if-no-files-found: error
+      - name: Upload validated playable
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsb-vice-city-v3-playable
+          path: untracked/dsb-night-v3-playable/
+          if-no-files-found: error
+      - name: Publish only the three reviewed files to the existing draft branch
+        shell: bash
+        run: |
+          git fetch origin refs/heads/feature/dsb-vice-city-night-lighting
+          test "$(git rev-parse FETCH_HEAD)" = "$(cat "$RUNNER_TEMP/dsb-v3-start")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/js/dsb-atmosphere.js src/js/dsb-water.js test/run.mjs
+          git rm .github/workflows/dsb-night-v3-draft.yml
+          git commit -m "Expand DSB coastal nightlife and refine wave-driven reflections"
+          git push origin HEAD:refs/heads/feature/dsb-vice-city-night-lighting
